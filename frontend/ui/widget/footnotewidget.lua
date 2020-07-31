@@ -90,6 +90,11 @@ body > li { list-style-type: none; }
 /* Remove any (possibly multiple) backlinks in Wikipedia EPUBs footnotes */
 .noprint { display: none; }
 
+/* Style some FB2 tags not known to MuPDF */
+emphasis { font-style: italic; }
+strikethrough { text-decoration: line-through; }
+underline { text-decoration: underline; }
+
 /* Attempt to display FB2 footnotes as expected (as crengine does, putting
  * the footnote number on the same line as the first paragraph via its
  * support of "display: run-in" and a possibly added autoBoxing element) */
@@ -291,7 +296,7 @@ function FootnoteWidget:init()
         local added_bottom_pad = 0
         -- See if needed:
         -- Add a bit to bottom padding, as getSinglePageHeight() cut can be rough
-        -- added_bottom_pad = font_size * 0.2
+        -- added_bottom_pad = math.floor(font_size * 0.2)
         local reduced_height = single_page_height + top_border_size + padding_top + padding_bottom + added_bottom_pad
         vgroup = CenterContainer:new{
             dimen = Geom:new{

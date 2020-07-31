@@ -60,7 +60,7 @@ end
 
 function ReaderToc:onPageUpdate(pageno)
     self.pageno = pageno
-    if G_reader_settings:readSetting("full_refresh_count") == -1 then
+    if UIManager.FULL_REFRESH_COUNT == -1 then
         if self:isChapterEnd(pageno, 0) then
             self.chapter_refresh = true
         elseif self:isChapterBegin(pageno, 0) and self.chapter_refresh then
@@ -79,7 +79,7 @@ function ReaderToc:onPosUpdate(pos, pageno)
 end
 
 function ReaderToc:fillToc()
-    if self.toc and #self.toc > 0 then return end
+    if self.toc then return end
     if self.ui.document:canHaveAlternativeToc() then
         if self.ui.doc_settings:readSetting("alternative_toc") then
             -- (if the document has a cache, the previously built alternative
@@ -203,7 +203,7 @@ function ReaderToc:getTocIndexByPage(pn_or_xp)
     if #self.toc == 0 then return end
     local pageno = pn_or_xp
     if type(pn_or_xp) == "string" then
-        pageno = self.ui.document:getPageFromXPointer(pn_or_xp)
+        return self:getAccurateTocIndexByXPointer(pn_or_xp)
     end
     local pre_index = 1
     for _k,_v in ipairs(self.toc) do
@@ -213,6 +213,38 @@ function ReaderToc:getTocIndexByPage(pn_or_xp)
         pre_index = _k
     end
     return pre_index
+end
+
+function ReaderToc:getAccurateTocIndexByXPointer(xptr)
+    local pageno = self.ui.document:getPageFromXPointer(xptr)
+    -- get toc entry(index) on for the current page
+    -- we don't get infinite loop, because the this call is not
+    -- with xpointer, but with page
+    local index = self:getTocIndexByPage(pageno)
+    if not index or not self.toc[index] then return end
+    local initial_comparison = self.ui.document:compareXPointers(self.toc[index].xpointer, xptr)
+    if initial_comparison and initial_comparison < 0 then
+        local i = index - 1
+        while self.toc[i] do
+            local toc_xptr = self.toc[i].xpointer
+            local cmp = self.ui.document:compareXPointers(toc_xptr, xptr)
+            if cmp and cmp >= 0 then -- toc_xptr is before xptr(xptr >= toc_xptr)
+                return i
+            end
+            i = i - 1
+        end
+    else
+        local i = index + 1
+        while self.toc[i] do
+            local toc_xptr = self.toc[i].xpointer
+            local cmp = self.ui.document:compareXPointers(toc_xptr, xptr)
+            if cmp and cmp < 0 then -- toc_xptr is after xptr(xptr < toc_xptr)
+                return i - 1
+            end
+            i = i + 1
+        end
+    end
+    return index
 end
 
 function ReaderToc:getTocTitleByPage(pn_or_xp)
@@ -283,6 +315,21 @@ function ReaderToc:getTocTicks(level)
         self.ticks[level] = ticks
     end
     return ticks
+end
+
+function ReaderToc:getTocTicksForFooter()
+    local ticks_candidates = {}
+    local max_level = self:getMaxDepth()
+    for i = 0, -max_level, -1 do
+        local ticks = self:getTocTicks(i)
+        table.insert(ticks_candidates, ticks)
+    end
+    if #ticks_candidates > 0 then
+        -- Find the finest toc ticks by sorting out the largest one
+        table.sort(ticks_candidates, function(a, b) return #a > #b end)
+        return ticks_candidates[1]
+    end
+    return {}
 end
 
 function ReaderToc:getNextChapter(cur_pageno, level)
@@ -389,6 +436,9 @@ function ReaderToc:onShowToc()
             v.mandatory = v.page
             if v.orig_page then -- bogus page fixed: show original page number
                 v.mandatory = T("(%1) %2", v.orig_page, v.page)
+            end
+            if self.ui.pagemap and self.ui.pagemap:wantsPageLabels() then
+                v.mandatory = self.ui.pagemap:getXPointerPageLabel(v.xpointer)
             end
         end
     end
@@ -609,7 +659,7 @@ function ReaderToc:addToMainMenu(menu_items)
                         self.ui.doc_settings:saveSetting("alternative_toc", true)
                         self:onShowToc()
                         self.view.footer:setTocMarkers(true)
-                        self.view.footer:updateFooter()
+                        self.view.footer:onUpdateFooter()
                     end,
                 })
             end

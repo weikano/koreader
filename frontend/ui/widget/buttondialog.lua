@@ -20,8 +20,9 @@ local ButtonDialog = InputContainer:new{
 
 function ButtonDialog:init()
     if Device:hasKeys() then
+        local close_keys = Device:hasFewKeys() and { "Back", "Left" } or "Back"
         self.key_events = {
-            Close = { {"Back"}, doc = "close button dialog" }
+            Close = { { close_keys }, doc = "close button dialog" }
         }
     end
     if Device:isTouchDevice() then
@@ -42,7 +43,7 @@ function ButtonDialog:init()
             alpha = self.alpha,
             FrameContainer:new{
                 ButtonTable:new{
-                    width = Screen:getWidth()*0.9,
+                    width = math.floor(Screen:getWidth() * 0.9),
                     buttons = self.buttons,
                     show_parent = self,
                 },

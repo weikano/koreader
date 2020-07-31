@@ -54,6 +54,12 @@ function ReaderStatus:onEndOfBook()
     if G_reader_settings:readSetting("collate") == "access" then
         collate = false
     end
+
+    -- Should we start by marking the book as read?
+    if G_reader_settings:isTrue("end_document_auto_mark") then
+        self:onMarkBook(true)
+    end
+
     if settings == "pop-up" or settings == nil then
         local buttons = {
             {
@@ -198,14 +204,14 @@ function ReaderStatus:deleteFile(file, text_end_book)
         ok_text = _("Delete"),
         ok_callback = function()
             local FileManager = require("apps/filemanager/filemanager")
-            local filemanagerutil = require("apps/filemanager/filemanagerutil")
+            self.ui:onClose()
             FileManager:deleteFile(file)
-            filemanagerutil.removeFileFromHistoryIfWanted(file)
-            filemanagerutil.ensureLastFileExists()
+            require("readhistory"):fileDeleted(file) -- (will update "lastfile")
             if FileManager.instance then
                 FileManager.instance.file_chooser:refreshPath()
+            else
+                FileManager:showFiles()
             end
-            self:openFileBrowser()
         end,
     })
 end

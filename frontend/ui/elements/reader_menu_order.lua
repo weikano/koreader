@@ -15,6 +15,7 @@ local order = {
         "bookmarks",
         "toggle_bookmark",
         "bookmark_browsing_mode",
+        "page_map",
         "----------------------------",
         "go_to",
         "skim_to",
@@ -27,7 +28,7 @@ local order = {
         "style_tweaks",
         "----------------------------",
         "change_font",
-        "hyphenation",
+        "typography",
         "floating_punctuation",
         "----------------------------",
         "switch_zoom_mode",
@@ -73,6 +74,8 @@ local order = {
         "enable_back_history",
         "android_volume_keys",
         "android_camera_key",
+        "android_haptic_feedback",
+        "android_back_button",
         "----------------------------",
         "invert_page_turn_gestures",
         "invert_page_turn_buttons",
@@ -80,9 +83,11 @@ local order = {
     network = {
         "network_wifi",
         "network_proxy",
+        "network_powersave",
         "network_restore",
         "network_info",
         "network_before_wifi_action",
+        "network_after_wifi_action",
         "network_dismiss_scan",
         "----------------------------",
         "ssh",
@@ -90,11 +95,11 @@ local order = {
     screen = {
         "screensaver",
         "----------------------------",
+        "screen_rotation",
+        "----------------------------",
         "screen_dpi",
         "screen_eink_opt",
         "color_rendering",
-        "----------------------------",
-        "screen_toggle_gsensor",
         "----------------------------",
         "screen_timeout",
         "fullscreen",
@@ -111,26 +116,29 @@ local order = {
     },
     tools = {
         "read_timer",
-        "calibre_wireless_connection",
+        "calibre",
         "evernote",
         "statistics",
         "progress_sync",
+        "move_to_archive",
         "wallabag",
         "zsync",
         "news_downloader",
         "send2ebook",
         "text_editor",
+        "profiles",
         "----------------------------",
-        "more_plugins",
-        "plugin_management",
+        "more_tools",
     },
-    more_plugins = {
+    more_tools = {
         "auto_frontlight",
         "battery_statistics",
         "synchronize_time",
         "keep_alive",
         "doc_setting_tweak",
         "terminal",
+        "----------------------------",
+        "plugin_management",
     },
     search = {
         "dictionary_lookup",
@@ -145,6 +153,7 @@ local order = {
         "----------------------------",
         "goodreads",
         "----------------------------",
+        "find_book_in_calibre_catalog",
         "fulltext_search",
     },
     filemanager = {},
@@ -174,18 +183,18 @@ local order = {
         "about",
     },
     exit_menu = {
-        "restart_koreader",
+        "restart_koreader", -- if Device:canRestart()
         "----------------------------",
-        "sleep", -- if Device:isKindle() or Device:isKobo()
-        "poweroff", -- if Device:isKobo()
-        "reboot",   -- if Device:isKobo()
+        "sleep", -- if Device:canSuspend()
+        "poweroff", -- if Device:canPowerOff()
+        "reboot", -- if Device:canReboot()
         "----------------------------",
-        "start_bq",
+        "start_bq", -- if Device:isCervantes()
         "exit",
     }
 }
 
-if Device:isAndroid() then
+if not Device:hasExitOptions() then
     order.exit_menu = nil
 end
 

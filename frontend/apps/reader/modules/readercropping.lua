@@ -13,10 +13,11 @@ local RightContainer = require("ui/widget/container/rightcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = require("device").screen
+local _ = require("gettext")
 
 local PageCropDialog = VerticalGroup:new{
-    ok_text = "OK",
-    cancel_text = "Cancel",
+    ok_text = _("OK"),
+    cancel_text = _("Cancel"),
     ok_callback = function() end,
     cancel_callback = function() end,
     button_width = math.floor(Screen:scaleBySize(70)),
@@ -41,15 +42,15 @@ function PageCropDialog:init()
         show_parent = self,
     }
     local ok_container = RightContainer:new{
-        dimen = Geom:new{ w = Screen:getWidth()*0.33, h = Screen:getHeight()/12},
+        dimen = Geom:new{ w = math.floor(Screen:getWidth()*0.33), h = math.floor(Screen:getHeight()/12)},
         ok_button,
     }
     local cancel_container = LeftContainer:new{
-        dimen = Geom:new{ w = Screen:getWidth()*0.33, h = Screen:getHeight()/12},
+        dimen = Geom:new{ w = math.floor(Screen:getWidth()*0.33), h = math.floor(Screen:getHeight()/12)},
         cancel_button,
     }
     table.insert(horizontal_group, ok_container)
-    table.insert(horizontal_group, HorizontalSpan:new{ width = Screen:getWidth()*0.34})
+    table.insert(horizontal_group, HorizontalSpan:new{ width = math.floor(Screen:getWidth()*0.34)})
     table.insert(horizontal_group, cancel_container)
     self[2] = FrameContainer:new{
         horizontal_group,
@@ -72,7 +73,6 @@ function PageCropDialog:onShow()
     end)
     return true
 end
-
 
 local ReaderCropping = InputContainer:new{}
 
@@ -112,7 +112,7 @@ function ReaderCropping:onPageCrop(mode)
         self.ui:handleEvent(Event:new("SetZoomMode", "page", "cropping"))
     end
     self.ui:handleEvent(Event:new("SetDimensions",
-        Geom:new{w = Screen:getWidth(), h = Screen:getHeight()*11/12})
+        Geom:new{w = Screen:getWidth(), h = math.floor(Screen:getHeight()*11/12)})
     )
     self.bbox_widget = BBoxWidget:new{
         crop = self,

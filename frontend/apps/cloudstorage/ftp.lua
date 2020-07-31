@@ -52,9 +52,12 @@ function Ftp:downloadFile(item, address, user, pass, path, close)
 end
 
 function Ftp:config(item, callback)
-    local text_info = "FTP address must be in the format ftp://example.domain.com\n"..
-        "Also supported is format with IP e.g: ftp://10.10.10.1\n"..
-        "Username and password are optional."
+    local text_info = _([[
+The FTP address must be in the following format:
+ftp://example.domain.com
+An IP address is also supported, for example:
+ftp://10.10.10.1
+Username and password are optional.]])
     local hint_name = _("Your FTP name")
     local text_name = ""
     local hint_address = _("FTP address eg ftp://example.com")
@@ -146,8 +149,8 @@ function Ftp:config(item, callback)
                 },
             },
         },
-        width = Screen:getWidth() * 0.95,
-        height = Screen:getHeight() * 0.2,
+        width = math.floor(Screen:getWidth() * 0.95),
+        height = math.floor(Screen:getHeight() * 0.2),
         input_type = "text",
     }
     UIManager:show(self.settings_dialog)

@@ -5,6 +5,7 @@ This module defines stubs for common methods.
 --]]
 
 local logger = require("logger")
+local util = require("util")
 local _ = require("gettext")
 
 local function yes() return true end
@@ -21,14 +22,18 @@ local Device = {
     screen = nil,
     screen_dpi_override = nil,
     input = nil,
+    home_dir = nil,
     -- For Kobo, wait at least 15 seconds before calling suspend script. Otherwise, suspend might
     -- fail and the battery will be drained while we are in screensaver mode
     suspend_wait_timeout = 15,
 
     -- hardware feature tests: (these are functions!)
+    hasBattery = yes,
     hasKeyboard = no,
     hasKeys = no,
     hasDPad = no,
+    hasExitOptions = yes,
+    hasFewKeys = no,
     hasWifiToggle = yes,
     hasWifiManager = no,
     isHapticFeedbackEnabled = no,
@@ -47,10 +52,13 @@ local Device = {
     hasBGRFrameBuffer = no,
     canImportFiles = no,
     canShareText = no,
+    hasGSensor = no,
     canToggleGSensor = no,
+    isGSensorLocked = no,
     canToggleMassStorage = no,
     canUseWAL = yes, -- requires mmap'ed I/O on the target FS
     canRestart = yes,
+    canSuspend = yes,
     canReboot = no,
     canPowerOff = no,
 
@@ -171,6 +179,13 @@ function Device:init()
             self:invertButtons()
         end
     end
+
+    -- Honor the gyro lock
+    if self:hasGSensor() then
+        if G_reader_settings:isTrue("input_lock_gsensor") then
+            self:lockGSensor(true)
+        end
+    end
 end
 
 function Device:setScreenDPI(dpi_override)
@@ -231,14 +246,17 @@ function Device:onPowerEvent(ev)
         logger.dbg("Suspending...")
         -- Mostly always suspend in Portrait/Inverted Portrait mode...
         -- ... except when we just show an InfoMessage or when the screensaver
-        -- is disabled, as it plays badly with Landscape mode (c.f., #4098 and #5290)
+        -- is disabled, as it plays badly with Landscape mode (c.f., #4098 and #5290).
+        -- We also exclude full-screen widgets that work fine in Landscape mode,
+        -- like ReadingProgress and BookStatus (c.f., #5724)
         local screensaver_type = G_reader_settings:readSetting("screensaver_type")
-        if screensaver_type ~= "message" and screensaver_type ~= "disable" then
+        if screensaver_type ~= "message" and screensaver_type ~= "disable" and
+           screensaver_type ~= "readingprogress" and screensaver_type ~= "bookstatus" then
             self.orig_rotation_mode = self.screen:getRotationMode()
             -- Leave Portrait & Inverted Portrait alone, that works just fine.
             if bit.band(self.orig_rotation_mode, 1) == 1 then
                 -- i.e., only switch to Portrait if we're currently in *any* Landscape orientation (odd number)
-                self.screen:setRotationMode(0)
+                self.screen:setRotationMode(self.screen.ORIENTATION_PORTRAIT)
             else
                 self.orig_rotation_mode = nil
             end
@@ -264,18 +282,22 @@ function Device:onPowerEvent(ev)
         self.screen_saver_mode = true
         UIManager:scheduleIn(0.1, function()
           local network_manager = require("ui/network/manager")
-          -- NOTE: wifi_was_on does not necessarily mean that WiFi is *currently* on! It means *we* enabled it.
+          -- NOTE: wifi_was_on does not necessarily mean that Wi-Fi is *currently* on! It means *we* enabled it.
           --       This is critical on Kobos (c.f., #3936), where it might still be on from KSM or Nickel,
           --       without us being aware of it (i.e., wifi_was_on still unset or false),
-          --       because suspend will at best fail, and at worst deadlock the system if WiFi is on,
+          --       because suspend will at best fail, and at worst deadlock the system if Wi-Fi is on,
           --       regardless of who enabled it!
-          if network_manager.wifi_was_on or network_manager:isWifiOn() then
+          if network_manager:isWifiOn() then
               network_manager:releaseIP()
               network_manager:turnOffWifi()
           end
           UIManager:scheduleIn(self.suspend_wait_timeout, self.suspend)
         end)
     end
+end
+
+function Device:info()
+    return self.model
 end
 
 -- Hardware specific method to handle usb plug in event
@@ -307,6 +329,10 @@ function Device:setDateTime(year, month, day, hour, min, sec) end
 -- Device specific method if any setting needs being saved
 function Device:saveSettings() end
 
+-- Simulates suspend/resume
+function Device:simulateSuspend() end
+function Device:simulateResume() end
+
 --[[--
 Device specific method for performing haptic feedback.
 
@@ -314,8 +340,33 @@ Device specific method for performing haptic feedback.
 --]]
 function Device:performHapticFeedback(type) end
 
+-- Device specific method for toggling input events
+function Device:setIgnoreInput(enable) return true end
+
 -- Device specific method for toggling the GSensor
 function Device:toggleGSensor(toggle) end
+
+-- Whether or not the GSensor should be locked to the current orientation (i.e. Portrait <-> Inverted Portrait or Landscape <-> Inverted Landscape only)
+function Device:lockGSensor(toggle)
+    if not self:hasGSensor() then
+        return
+    end
+
+    if toggle == true then
+        -- Lock GSensor to current roientation
+        self.isGSensorLocked = yes
+    elseif toggle == false then
+        -- Unlock GSensor
+        self.isGSensorLocked = no
+    else
+        -- Toggle it
+        if self:isGSensorLocked() then
+            self.isGSensorLocked = no
+        else
+            self.isGSensorLocked = yes
+        end
+    end
+end
 
 -- Device specific method for set custom light levels
 function Device:setScreenBrightness(level) end
@@ -378,6 +429,17 @@ end
 -- 4: dazzling.
 function Device:ambientBrightnessLevel()
     return 0
+end
+
+--- Returns true if the file is a script we allow running
+--- Basically a helper method to check a specific list of file extensions for executable scripts
+---- @string filename
+---- @treturn boolean
+function Device:canExecuteScript(file)
+    local file_ext = string.lower(util.getFileNameSuffix(file))
+    if file_ext == "sh" or file_ext == "py"  then
+        return true
+    end
 end
 
 return Device

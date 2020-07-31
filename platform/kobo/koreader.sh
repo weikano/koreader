@@ -1,14 +1,14 @@
 #!/bin/sh
 export LC_ALL="en_US.UTF-8"
 
-# working directory of koreader
-KOREADER_DIR="${0%/*}"
+# Compute our working directory in an extremely defensive manner
+KOREADER_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
 
-# we're always starting from our working directory
-cd "${KOREADER_DIR}" || exit
+# We rely on starting from our working directory, and it needs to be set, sane and absolute.
+cd "${KOREADER_DIR:-/dev/null}" || exit
 
 # Attempt to switch to a sensible CPUFreq governor when that's not already the case...
-current_cpufreq_gov="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)"
+IFS= read -r current_cpufreq_gov <"/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
 # NOTE: We're being fairly conservative here, because what's used and what's available varies depending on HW...
 if [ "${current_cpufreq_gov}" != "ondemand" ] && [ "${current_cpufreq_gov}" != "interactive" ]; then
     # NOTE: Go with ondemand, because it's likely to be the lowest common denominator.
@@ -73,33 +73,61 @@ export STARDICT_DATA_DIR="data/dict"
 # export external font directory
 export EXT_FONT_DIR="/mnt/onboard/fonts"
 
-# fast and dirty way of check if we are called from nickel
-# through fmon/KFMon, or from another launcher (KSM or advboot)
-# Do not delete this line because KSM detects newer versions of KOReader by the presence of the phrase 'from_nickel'.
-export FROM_NICKEL="false"
+# Quick'n dirty way of checking if we were started while Nickel was running (e.g., KFMon),
+# or from another launcher entirely, outside of Nickel (e.g., KSM).
+VIA_NICKEL="false"
 if pkill -0 nickel; then
-    FROM_NICKEL="true"
+    VIA_NICKEL="true"
 fi
+# NOTE: Do not delete this line because KSM detects newer versions of KOReader by the presence of the phrase 'from_nickel'.
 
-if [ "${FROM_NICKEL}" = "true" ]; then
+if [ "${VIA_NICKEL}" = "true" ]; then
     # Detect if we were started from KFMon
     FROM_KFMON="false"
     if pkill -0 kfmon; then
         # That's a start, now check if KFMon truly is our parent...
-        if [ "$(pidof kfmon)" -eq "${PPID}" ]; then
+        if [ "$(pidof -s kfmon)" -eq "${PPID}" ]; then
             FROM_KFMON="true"
         fi
     fi
 
-    # Siphon a few things from nickel's env (namely, stuff exported by rcS *after* on-animator.sh has been launched)...
-    eval "$(xargs -n 1 -0 <"/proc/$(pidof nickel)/environ" | grep -e DBUS_SESSION_BUS_ADDRESS -e NICKEL_HOME -e WIFI_MODULE -e LANG -e WIFI_MODULE_PATH -e INTERFACE 2>/dev/null)"
-    export DBUS_SESSION_BUS_ADDRESS NICKEL_HOME WIFI_MODULE LANG WIFI_MODULE_PATH INTERFACE
+    # Check if Nickel is our parent...
+    FROM_NICKEL="false"
+    if [ -n "${NICKEL_HOME}" ]; then
+        FROM_NICKEL="true"
+    fi
 
-    # flush disks, might help avoid trashing nickel's DB...
+    # If we were spawned outside of Nickel, we'll need a few extra bits from its own env...
+    if [ "${FROM_NICKEL}" = "false" ]; then
+        # Siphon a few things from nickel's env (namely, stuff exported by rcS *after* on-animator.sh has been launched)...
+        # shellcheck disable=SC2046
+        export $(grep -s -E -e '^(DBUS_SESSION_BUS_ADDRESS|NICKEL_HOME|WIFI_MODULE|LANG|WIFI_MODULE_PATH|INTERFACE)=' "/proc/$(pidof -s nickel)/environ")
+        # NOTE: Quoted variant, w/ the busybox RS quirk (c.f., https://unix.stackexchange.com/a/125146):
+        #eval "$(awk -v 'RS="\0"' '/^(DBUS_SESSION_BUS_ADDRESS|NICKEL_HOME|WIFI_MODULE|LANG|WIFI_MODULE_PATH|INTERFACE)=/{gsub("\047", "\047\\\047\047"); print "export \047" $0 "\047"}' "/proc/$(pidof -s nickel)/environ")"
+    fi
+
+    # Flush disks, might help avoid trashing nickel's DB...
     sync
-    # stop kobo software because it's running
+    # And we can now stop the full Kobo software stack
     # NOTE: We don't need to kill KFMon, it's smart enough not to allow running anything else while we're up
-    killall -TERM nickel hindenburg sickel fickel fmon 2>/dev/null
+    # NOTE: We kill Nickel's master dhcpcd daemon on purpose,
+    #       as we want to be able to use our own per-if processes w/ custom args later on.
+    #       A SIGTERM does not break anything, it'll just prevent automatic lease renewal until the time
+    #       KOReader actually sets the if up itself (i.e., it'll do)...
+    killall -q -TERM nickel hindenburg sickel fickel adobehost dhcpcd-dbus dhcpcd fmon
+
+    # Wait for Nickel to die... (oh, procps with killall -w, how I miss you...)
+    kill_timeout=0
+    while pkill -0 nickel; do
+        # Stop waiting after 4s
+        if [ ${kill_timeout} -ge 15 ]; then
+            break
+        fi
+        usleep 250000
+        kill_timeout=$((kill_timeout + 1))
+    done
+    # Remove Nickel's FIFO to avoid udev & udhcpc scripts hanging on open() on it...
+    rm -f /tmp/nickel-hardware-status
 fi
 
 # fallback for old fmon, KFMon and advboot users (-> if no args were passed to the script, start the FM)
@@ -111,11 +139,21 @@ fi
 
 # check whether PLATFORM & PRODUCT have a value assigned by rcS
 if [ -z "${PRODUCT}" ]; then
+    # shellcheck disable=SC2046
+    export $(grep -s -e '^PRODUCT=' "/proc/$(pidof -s udevd)/environ")
+fi
+
+if [ -z "${PRODUCT}" ]; then
     PRODUCT="$(/bin/kobo_config.sh 2>/dev/null)"
     export PRODUCT
 fi
 
-# PLATFORM is used in koreader for the path to the WiFi drivers (as well as when restarting nickel)
+# PLATFORM is used in koreader for the path to the Wi-Fi drivers (as well as when restarting nickel)
+if [ -z "${PLATFORM}" ]; then
+    # shellcheck disable=SC2046
+    export $(grep -s -e '^PLATFORM=' "/proc/$(pidof -s udevd)/environ")
+fi
+
 if [ -z "${PLATFORM}" ]; then
     PLATFORM="freescale"
     if dd if="/dev/mmcblk0" bs=512 skip=1024 count=1 | grep -q "HW CONFIG"; then
@@ -139,7 +177,7 @@ fi
 
 # We'll want to ensure Portrait rotation to allow us to use faster blitting codepaths @ 8bpp,
 # so remember the current one before fbdepth does its thing.
-ORIG_FB_ROTA="$(cat /sys/class/graphics/fb0/rotate)"
+IFS= read -r ORIG_FB_ROTA <"/sys/class/graphics/fb0/rotate"
 echo "Original fb rotation is set @ ${ORIG_FB_ROTA}" >>crash.log 2>&1
 
 # In the same vein, swap to 8bpp,
@@ -150,7 +188,7 @@ echo "Original fb rotation is set @ ${ORIG_FB_ROTA}" >>crash.log 2>&1
 # NOTE: Even though both pickel & Nickel appear to restore their preferred fb setup, we'll have to do it ourselves,
 #       as they fail to flip the grayscale flag properly. Plus, we get to play nice with every launch method that way.
 #       So, remember the current bitdepth, so we can restore it on exit.
-ORIG_FB_BPP="$(./fbdepth -g)"
+IFS= read -r ORIG_FB_BPP <"/sys/class/graphics/fb0/bits_per_pixel"
 echo "Original fb bitdepth is set @ ${ORIG_FB_BPP}bpp" >>crash.log 2>&1
 # Sanity check...
 case "${ORIG_FB_BPP}" in
@@ -188,6 +226,16 @@ ko_do_fbdepth() {
     fi
 }
 
+# Ensure we start with a valid nameserver in resolv.conf, otherwise we're stuck with broken name resolution (#6421, #6424).
+# Fun fact: this wouldn't be necessary if Kobo were using a non-prehistoric glibc... (it was fixed in glibc 2.26).
+ko_do_dns() {
+    # If there aren't any servers listed, append CloudFlare's
+    if not grep -q '^nameserver' "/etc/resolv.conf"; then
+        echo "# Added by KOReader because your setup is broken" >>"/etc/resolv.conf"
+        echo "nameserver 1.1.1.1" >>"/etc/resolv.conf"
+    fi
+}
+
 # Remount the SD card RW if it's inserted and currently RO
 if awk '$4~/(^|,)ro($|,)/' /proc/mounts | grep ' /mnt/sd '; then
     mount -o remount,rw /mnt/sd
@@ -211,6 +259,8 @@ while [ ${RETURN_VALUE} -ne 0 ]; do
         ko_update_check
         # Do or double-check the fb depth switch, or restore original bitdepth if requested
         ko_do_fbdepth
+        # Make sure we have a sane resolv.conf
+        ko_do_dns
     fi
 
     ./reader.lua "${args}" >>crash.log 2>&1
@@ -252,11 +302,11 @@ while [ ${RETURN_VALUE} -ne 0 ]; do
         fi
         # U+1F4A3, the hard way, because we can't use \u or \U escape sequences...
         # shellcheck disable=SC2039
-        ./fbink -q -b -O -m -t regular=./fonts/freefont/FreeSerif.ttf,px=${bombHeight},top=${bombMargin} $'\xf0\x9f\x92\xa3'
+        ./fbink -q -b -O -m -t regular=./fonts/freefont/FreeSerif.ttf,px=${bombHeight},top=${bombMargin} -- $'\xf0\x9f\x92\xa3'
         # And then print the tail end of the log on the bottom of the screen...
         crashLog="$(tail -n 25 crash.log | sed -e 's/\t/    /g')"
         # The idea for the margins being to leave enough room for an fbink -Z bar, small horizontal margins, and a font size based on what 6pt looked like @ 265dpi
-        ./fbink -q -b -O -t regular=./fonts/droid/DroidSansMono.ttf,top=$((viewHeight / 2 + FONTH * 2 + FONTH / 2)),left=$((viewWidth / 60)),right=$((viewWidth / 60)),px=$((viewHeight / 64)) "${crashLog}"
+        ./fbink -q -b -O -t regular=./fonts/droid/DroidSansMono.ttf,top=$((viewHeight / 2 + FONTH * 2 + FONTH / 2)),left=$((viewWidth / 60)),right=$((viewWidth / 60)),px=$((viewHeight / 64)) -- "${crashLog}"
         # So far, we hadn't triggered an actual screen refresh, do that now, to make sure everything is bundled in a single flashing refresh.
         ./fbink -q -f -s
         # Cue a lemming's faceplant sound effect!
@@ -316,11 +366,9 @@ if [ -n "${ORIG_CPUFREQ_GOV}" ]; then
     echo "${ORIG_CPUFREQ_GOV}" >"/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
 fi
 
-if [ "${FROM_NICKEL}" = "true" ]; then
-    if [ "${FROM_KFMON}" != "true" ]; then
-        # start kobo software because it was running before koreader
-        ./nickel.sh &
-    else
+if [ "${VIA_NICKEL}" = "true" ]; then
+    if [ "${FROM_KFMON}" = "true" ]; then
+        # KFMon is the only launcher that has a toggle to either reboot or restart Nickel on exit
         if grep -q "reboot_on_exit=false" "/mnt/onboard/.adds/kfmon/config/koreader.ini" 2>/dev/null; then
             # KFMon asked us to restart nickel on exit (default since KFMon 0.9.5)
             ./nickel.sh &
@@ -328,6 +376,9 @@ if [ "${FROM_NICKEL}" = "true" ]; then
             # KFMon asked us to restart the device on exit
             /sbin/reboot
         fi
+    else
+        # Otherwise, just restart Nickel
+        ./nickel.sh &
     fi
 else
     # if we were called from advboot then we must reboot to go to the menu

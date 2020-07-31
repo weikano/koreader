@@ -13,7 +13,6 @@ local OPDSParser = require("ui/opdsparser")
 local Screen = require("device").screen
 local UIManager = require("ui/uimanager")
 local http = require('socket.http')
-local https = require('ssl.https')
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local ltn12 = require('ltn12')
@@ -50,11 +49,21 @@ local OPDSBrowser = Menu:extend{
         ["application/epub+zip"] = "EPUB",
         ["application/fb2+zip"] = "FB2",
         ["application/pdf"] = "PDF",
+        ["text/html"] = "HTML",
         ["text/plain"] = "TXT",
         ["application/x-mobipocket-ebook"] = "MOBI",
         ["application/x-mobi8-ebook"] = "AZW3",
+        ["application/vnd.amazon.mobi8-ebook"] = "AZW3",
         ["application/x-cbz"] = "CBZ",
+        ["application/vnd.comicbook+zip"] = "CBZ",
+        ["application/zip"] = "CBZ",
         ["application/x-cbr"] = "CBR",
+        ["application/vnd.comicbook-rar"] = "CBR",
+        ["application/x-rar-compressed"] = "CBR",
+        ["application/vnd.rar"] = "CBR",
+        ["application/djvu"] = "DJVU",
+        ["image/x-djvu"] = "DJVU",
+        ["image/vnd.djvu"] = "DJVU",
     },
 
     width = Screen:getWidth(),
@@ -194,8 +203,8 @@ function OPDSBrowser:addNewCatalog()
                 },
             },
         },
-        width = Screen:getWidth() * 0.95,
-        height = Screen:getHeight() * 0.2,
+        width = math.floor(Screen:getWidth() * 0.95),
+        height = math.floor(Screen:getHeight() * 0.2),
     }
     UIManager:show(self.add_server_dialog)
     self.add_server_dialog:onShowKeyboard()
@@ -244,8 +253,8 @@ function OPDSBrowser:editCalibreServer()
                 },
             },
         },
-        width = Screen:getWidth() * 0.95,
-        height = Screen:getHeight() * 0.2,
+        width = math.floor(Screen:getWidth() * 0.95),
+        height = math.floor(Screen:getHeight() * 0.2),
     }
     UIManager:show(self.add_server_dialog)
     self.add_server_dialog:onShowKeyboard()
@@ -306,8 +315,8 @@ function OPDSBrowser:fetchFeed(item_url, username, password, method)
     request['sink'] = ltn12.sink.table(sink)
     request['headers'] = username and { Authorization = "Basic " .. mime.b64(auth), ["Host"] = hostname, } or  { ["Host"] = hostname, }
     logger.info("request", request)
-    http.TIMEOUT, https.TIMEOUT = 10, 10
-    local httpRequest = parsed.scheme == 'http' and http.request or https.request
+    http.TIMEOUT = 10
+    local httpRequest = http.request
     local code, headers = socket.skip(1, httpRequest(request))
     -- raise error message when network is unavailable
     if headers == nil then
@@ -376,10 +385,7 @@ end
 
 function OPDSBrowser:getCatalog(item_url, username, password)
     local ok, catalog = pcall(self.parseFeed, self, item_url, username, password)
-    if not ok and catalog and not NetworkMgr:isOnline() then
-        NetworkMgr:promptWifiOn()
-        return
-    elseif not ok and catalog then
+    if not ok and catalog then
         logger.info("cannot get catalog info from", item_url, catalog)
         UIManager:show(InfoMessage:new{
             text = T(_("Cannot get catalog info from %1"), (BD.url(item_url) or "")),
@@ -548,7 +554,7 @@ function OPDSBrowser:downloadFile(item, format, remote_url)
         UIManager:scheduleIn(1, function()
             logger.dbg("downloading file", local_path, "from", remote_url)
             local parsed = url.parse(remote_url)
-            http.TIMEOUT, https.TIMEOUT = 20, 20
+            http.TIMEOUT = 20
 
             local dummy, c = nil
 
@@ -563,7 +569,7 @@ function OPDSBrowser:downloadFile(item, format, remote_url)
                 local auth = string.format("%s:%s", item.username, item.password)
                 local hostname = parsed.host
 
-                dummy, c = https.request {
+                dummy, c = http.request {
                     url         = remote_url,
                     headers     = { Authorization = "Basic " .. mime.b64(auth), ["Host"] = hostname },
                     sink        = ltn12.sink.file(io.open(local_path, "w")),
@@ -723,11 +729,17 @@ function OPDSBrowser:onMenuSelect(item)
         self:showDownloads(item)
     -- navigation
     else
+        local connect_callback
         if item.searchable then
-            self:browseSearchable(item.url, item.username, item.password)
+            connect_callback = function()
+                self:browseSearchable(item.url, item.username, item.password)
+            end
         else
-            self:browse(item.url, item.username, item.password)
+            connect_callback = function()
+                self:browse(item.url, item.username, item.password)
+            end
         end
+        NetworkMgr:runWhenConnected(connect_callback)
     end
     return true
 end
@@ -791,8 +803,8 @@ function OPDSBrowser:editOPDSServer(item)
                 },
             },
         },
-        width = Screen:getWidth() * 0.95,
-        height = Screen:getHeight() * 0.2,
+        width = math.floor(Screen:getWidth() * 0.95),
+        height = math.floor(Screen:getHeight() * 0.2),
     }
     UIManager:show(self.edit_server_dialog)
     self.edit_server_dialog:onShowKeyboard()

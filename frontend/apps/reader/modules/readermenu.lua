@@ -59,10 +59,16 @@ function ReaderMenu:init()
     if Device:hasKeys() then
         if Device:isTouchDevice() then
             self.key_events.TapShowMenu = { { "Menu" }, doc = "show menu", }
+            if Device:hasFewKeys() then
+                self.key_events.TapShowMenu = { { { "Menu", "Right" } }, doc = "show menu", }
+            end
         else
             -- map menu key to only top menu because bottom menu is only
             -- designed for touch devices
-            self.key_events.ShowReaderMenu = { { "Menu" }, doc = "show menu", }
+            self.key_events.ShowMenu = { { "Menu" }, doc = "show menu", }
+            if Device:hasFewKeys() then
+                self.key_events.ShowMenu = { { { "Menu", "Right" } }, doc = "show menu", }
+            end
         end
     end
     self.activation_menu = G_reader_settings:readSetting("activate_menu")
@@ -72,16 +78,7 @@ function ReaderMenu:init()
 end
 
 function ReaderMenu:getPreviousFile()
-    local previous_file = nil
-    local readhistory = require("readhistory")
-    for i=2, #readhistory.hist do -- skip first one which is current book
-        -- skip deleted items kept in history
-        if lfs.attributes(readhistory.hist[i].file, "mode") == "file" then
-            previous_file = readhistory.hist[i].file
-            break
-        end
-    end
-    return previous_file
+    return require("readhistory"):getPreviousFile(self.ui.document.file)
 end
 
 function ReaderMenu:onReaderReady()
@@ -234,7 +231,7 @@ function ReaderMenu:setUpdateItemTable()
             return self:getPreviousFile() ~= nil
         end,
         callback = function()
-            self.ui:switchDocument(self:getPreviousFile())
+            self.ui:onOpenLastDoc()
         end,
         hold_callback = function()
             local previous_file = self:getPreviousFile()
@@ -296,7 +293,7 @@ function ReaderMenu:exitOrRestart(callback)
     end
 end
 
-function ReaderMenu:onShowReaderMenu(tab_index)
+function ReaderMenu:onShowMenu(tab_index)
     if self.tab_item_table == nil then
         self:setUpdateItemTable()
     end
@@ -389,7 +386,7 @@ function ReaderMenu:onSwipeShowMenu(ges)
         if G_reader_settings:nilOrTrue("show_bottom_menu") then
             self.ui:handleEvent(Event:new("ShowConfigMenu"))
         end
-        self.ui:handleEvent(Event:new("ShowReaderMenu", self:_getTabIndexFromLocation(ges)))
+        self.ui:handleEvent(Event:new("ShowMenu", self:_getTabIndexFromLocation(ges)))
         return true
     end
 end
@@ -399,7 +396,7 @@ function ReaderMenu:onTapShowMenu(ges)
         if G_reader_settings:nilOrTrue("show_bottom_menu") then
             self.ui:handleEvent(Event:new("ShowConfigMenu"))
         end
-        self.ui:handleEvent(Event:new("ShowReaderMenu", self:_getTabIndexFromLocation(ges)))
+        self.ui:handleEvent(Event:new("ShowMenu", self:_getTabIndexFromLocation(ges)))
         return true
     end
 end

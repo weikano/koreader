@@ -185,6 +185,13 @@ DCREREADER_CONFIG_WORD_SPACING_SMALL = {75, 50}
 DCREREADER_CONFIG_WORD_SPACING_MEDIUM = {95, 75}
 DCREREADER_CONFIG_WORD_SPACING_LARGE = {100, 90}
 
+-- word expansion, to reduce excessive spacing on justified line
+-- by using letter spacing on the words
+-- value is the max allowed added letter spacing, as a % of the font size
+DCREREADER_CONFIG_WORD_EXPANSION_NONE = 0
+DCREREADER_CONFIG_WORD_EXPANSION_SOME = 5
+DCREREADER_CONFIG_WORD_EXPANSION_MORE = 15
+
 -- crereader progress bar (no longer needed)
 -- 0 for top "full" progress bar
 -- 1 for bottom "mini" progress bar
@@ -217,22 +224,23 @@ FRONTLIGHT_SENSITIVITY_DECREASE = 2
 -- insensitive sort
 DALPHA_SORT_CASE_INSENSITIVE = true
 
+-- no longer needed
 -- Set a path to a folder that is filled by Calibre (must contain the file metadata.calibre)
 -- e.g.
 -- "/mnt/sd/.hidden" for Kobo with files in ".hidden" on the SD card
 -- "/mnt/onboard/MyPath" for Kobo with files in "MyPath" on the device itself
 -- "/mnt/us/documents/" for Kindle files in folder "documents"
-SEARCH_LIBRARY_PATH  = ""
-SEARCH_LIBRARY_PATH2 = ""
-
+--SEARCH_LIBRARY_PATH  = ""
+--SEARCH_LIBRARY_PATH2 = ""
+--
 -- Search parameters
-SEARCH_CASESENSITIVE = false
-
-SEARCH_AUTHORS = true
-SEARCH_TITLE = true
-SEARCH_TAGS = true
-SEARCH_SERIES = true
-SEARCH_PATH = true
+--SEARCH_CASESENSITIVE = false
+--
+--SEARCH_AUTHORS = true
+--SEARCH_TITLE = true
+--SEARCH_TAGS = true
+--SEARCH_SERIES = true
+--SEARCH_PATH = true
 
 -- Light parameter for Kobo
 KOBO_LIGHT_ON_START = -2           -- -1, -2 or 0-100.
@@ -250,6 +258,10 @@ NETWORK_PROXY = nil
 -- Experimental features
 -- Use turbo library to handle async HTTP request
 DUSE_TURBO_LIB = false
+
+-- Absolute path to stardict files (override)
+-- By default they're stored in data/dict under dataDir.
+STARDICT_DATA_DIR = nil
 
 -- ####################################################################
 -- following features are not supported right now

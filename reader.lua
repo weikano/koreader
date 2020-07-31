@@ -130,10 +130,15 @@ end
 if Device:hasEinkScreen() then
     Device.screen:setupDithering()
     if Device.screen.hw_dithering and G_reader_settings:isTrue("dev_no_hw_dither") then
-        Device.screen:toggleHWDithering()
+        Device.screen:toggleHWDithering(false)
     end
     if Device.screen.sw_dithering and G_reader_settings:isTrue("dev_no_sw_dither") then
-        Device.screen:toggleSWDithering()
+        Device.screen:toggleSWDithering(false)
+    end
+    -- NOTE: If device can HW dither (i.e., after setupDithering(), hw_dithering is true, but sw_dithering is false),
+    --       but HW dither is explicitly disabled, and SW dither enabled, don't leave SW dither disabled (i.e., re-enable sw_dithering)!
+    if Device:canHWDither() and G_reader_settings:isTrue("dev_no_hw_dither") and G_reader_settings:nilOrFalse("dev_no_sw_dither") then
+        Device.screen:toggleSWDithering(true)
     end
 end
 
@@ -277,6 +282,7 @@ if ARGV[argidx] and ARGV[argidx] ~= "" then
         local home_dir =
             G_reader_settings:readSetting("home_dir") or ARGV[argidx]
         UIManager:nextTick(function()
+            FileManager:setRotationMode(true)
             FileManager:showFiles(home_dir)
         end)
         -- always open history on top of filemanager so closing history

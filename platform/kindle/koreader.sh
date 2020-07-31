@@ -127,9 +127,9 @@ ko_update_check() {
         #       and run that one (c.f., #4602)...
         #       This is most likely a side-effect of the weird fuse overlay being used for /mnt/us (vs. the real vfat on /mnt/base-us),
         #       which we cannot use because it's been mounted noexec for a few years now...
-        cp -pf ./tar /var/tmp/gnutar
+        cp -pf "${KOREADER_DIR}/tar" /var/tmp/gnutar
         # shellcheck disable=SC2016
-        /var/tmp/gnutar --no-same-permissions --no-same-owner --checkpoint="${CPOINTS}" --checkpoint-action=exec='./fbink -q -y -6 -P $(($TAR_CHECKPOINT/$CPOINTS))' -C "/mnt/us" -xf "${NEWUPDATE}"
+        /var/tmp/gnutar --no-same-permissions --no-same-owner --checkpoint="${CPOINTS}" --checkpoint-action=exec='/var/tmp/fbink -q -y -6 -P $(($TAR_CHECKPOINT/$CPOINTS))' -C "/mnt/us" -xf "${NEWUPDATE}"
         fail=$?
         # And remove our temporary tar binary...
         rm -f /var/tmp/gnutar
@@ -141,7 +141,9 @@ ko_update_check() {
             eips_print_bottom_centered "KOReader will start momentarily . . ." 1
             # NOTE: Because, yep, that'll probably happen, as there's a high probability sh will throw a bogus syntax error,
             #       probably for the same fuse-related reasons as tar...
-            eips_print_bottom_centered "If it doesn't, you can safely relaunch it!" 0
+            # NOTE: Even if it doesn't necessarily leave the device in an unusable state,
+            #       always recommend a hard-reboot to flush stale ghost copies...
+            eips_print_bottom_centered "If it doesn't, you'll want to force a hard reboot" 0
         else
             # Huh ho...
             logmsg "Update failed :( (${fail})"
@@ -240,13 +242,17 @@ if [ "${STOP_FRAMEWORK}" = "no" ] && [ "${INIT_TYPE}" = "upstart" ]; then
             if [ "$(version "${FW_VERSION}")" -ge "$(version "5.7.2")" ]; then
                 # Less drastically, we'll also be "minimizing" (actually, resizing) the title bar manually (c.f., https://www.mobileread.com/forums/showpost.php?p=2449275&postcount=5).
                 # NOTE: Hiding it "works", but has a nasty side-effect of triggering ligl timeouts in some circumstances (c.f., https://github.com/koreader/koreader/pull/5943#issuecomment-598514376)
-                logmsg "Hiding the title bar . . ."
-                TITLEBAR_GEOMETRY="$(./wmctrl -l -G | grep "titleBar" | awk '{print $2,$3,$4,$5,$6}' OFS=',')"
-                ./wmctrl -r titleBar -e "${TITLEBAR_GEOMETRY%,*},1"
-                USED_WMCTRL="yes"
+                # FIXME: There's apparently a nasty side-effect on FW >= 5.12.4 which somehow softlocks the UI on exit (despite wmctrl succeeding). Don't have the HW to investigate, so, just drop it. (#6117)
+                if [ "$(version "${FW_VERSION}")" -lt "$(version "5.12.4")" ]; then
+                    logmsg "Hiding the title bar . . ."
+                    TITLEBAR_GEOMETRY="$(${KOREADER_DIR}/wmctrl -l -G | grep ":titleBar_ID:" | awk '{print $2,$3,$4,$5,$6}' OFS=',')"
+                    ${KOREADER_DIR}/wmctrl -r ":titleBar_ID:" -e "${TITLEBAR_GEOMETRY%,*},1"
+                    logmsg "Title bar geometry: '${TITLEBAR_GEOMETRY}' -> '$(${KOREADER_DIR}/wmctrl -l -G | grep ":titleBar_ID:" | awk '{print $2,$3,$4,$5,$6}' OFS=',')'"
+                    USED_WMCTRL="yes"
+                fi
                 if [ "${FROM_KUAL}" = "yes" ]; then
                     logmsg "Stopping awesome . . ."
-                    killall -stop awesome
+                    killall -STOP awesome
                     AWESOME_STOPPED="yes"
                 fi
             fi
@@ -273,13 +279,13 @@ fi
 # stop cvm (sysv & framework up only)
 if [ "${STOP_FRAMEWORK}" = "no" ] && [ "${INIT_TYPE}" = "sysv" ]; then
     logmsg "Stopping cvm . . ."
-    killall -stop cvm
+    killall -STOP cvm
 fi
 
 # SIGSTOP volumd, to inhibit USBMS (sysv & upstart)
 if [ -e "/etc/init.d/volumd" ] || [ -e "/etc/upstart/volumd.conf" ]; then
     logmsg "Stopping volumd . . ."
-    killall -stop volumd
+    killall -STOP volumd
     VOLUMD_STOPPED="yes"
 fi
 
@@ -314,13 +320,13 @@ fi
 # Resume volumd, if need be
 if [ "${VOLUMD_STOPPED}" = "yes" ]; then
     logmsg "Resuming volumd . . ."
-    killall -cont volumd
+    killall -CONT volumd
 fi
 
 # Resume cvm (only if we stopped it)
 if [ "${STOP_FRAMEWORK}" = "no" ] && [ "${INIT_TYPE}" = "sysv" ]; then
     logmsg "Resuming cvm . . ."
-    killall -cont cvm
+    killall -CONT cvm
     # We need to handle the screen refresh ourselves, frontend/device/kindle/device.lua's Kindle3.exit is called before we resume cvm ;).
     echo 'send 139' >/proc/keypad
     echo 'send 139' >/proc/keypad
@@ -341,7 +347,7 @@ if [ "${STOP_FRAMEWORK}" = "no" ] && [ "${INIT_TYPE}" = "upstart" ]; then
     # Depending on the FW version, we may have handled things in a few different manners...
     if [ "${AWESOME_STOPPED}" = "yes" ]; then
         logmsg "Resuming awesome . . ."
-        killall -cont awesome
+        killall -CONT awesome
     fi
     if [ "${PILLOW_HARD_DISABLED}" = "yes" ]; then
         logmsg "Enabling pillow . . ."
@@ -361,7 +367,20 @@ if [ "${STOP_FRAMEWORK}" = "no" ] && [ "${INIT_TYPE}" = "upstart" ]; then
     fi
     if [ "${USED_WMCTRL}" = "yes" ]; then
         logmsg "Restoring the title bar . . ."
-        ./wmctrl -r titleBar -e "${TITLEBAR_GEOMETRY}"
+        # NOTE: Wait and retry for a bit, because apparently there may be timing issues (c.f., #5990)?
+        usleep 250000
+        WMCTRL_COUNT=0
+        until [ "$(${KOREADER_DIR}/wmctrl -l -G | grep ":titleBar_ID:" | awk '{print $2,$3,$4,$5,$6}' OFS=',')" = "${TITLEBAR_GEOMETRY}" ]; do
+            # Abort after 5s
+            if [ ${WMCTRL_COUNT} -gt 20 ]; then
+                log "Giving up on restoring the title bar geometry!"
+                break
+            fi
+            ${KOREADER_DIR}/wmctrl -r ":titleBar_ID:" -e "${TITLEBAR_GEOMETRY}"
+            usleep 250000
+            WMCTRL_COUNT=$((WMCTRL_COUNT + 1))
+        done
+        logmsg "Title bar geometry restored to '$(${KOREADER_DIR}/wmctrl -l -G | grep ":titleBar_ID:" | awk '{print $2,$3,$4,$5,$6}' OFS=',')' (ought to be: '${TITLEBAR_GEOMETRY}') [after ${WMCTRL_COUNT} attempts]"
     fi
 fi
 

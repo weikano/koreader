@@ -6,7 +6,11 @@ describe("Readerfooter module", function()
     setup(function()
         require("commonrequire")
         package.unloadAll()
-        require("document/canvascontext"):init(require("device"))
+        local Device = require("device")
+        -- Override powerd for running tests on devices with batteries.
+        Device.powerd.isChargingHW = function() return false end
+        Device.powerd.getCapacityHW = function() return 0 end
+        require("document/canvascontext"):init(Device)
         DocumentRegistry = require("document/documentregistry")
         DocSettings = require("docsettings")
         ReaderUI = require("apps/reader/readerui")
@@ -70,6 +74,7 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_pdf))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         assert.is.same(true, readerui.view.footer_visible)
@@ -95,6 +100,7 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_pdf))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         assert.is.same(true, readerui.view.footer_visible)
@@ -112,6 +118,7 @@ describe("Readerfooter module", function()
         cfg:flush()
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         assert.is.same(false, readerui.view.footer_visible)
@@ -128,6 +135,7 @@ describe("Readerfooter module", function()
         cfg:flush()
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         assert.is.same(false, readerui.view.footer_visible)
@@ -144,6 +152,7 @@ describe("Readerfooter module", function()
         cfg:flush()
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         assert.is.same(true, readerui.view.footer_visible)
@@ -156,11 +165,12 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_epub))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
         footer:onPageUpdate(1)
-        footer:updateFooter()
+        footer:onUpdateFooter()
         local timeinfo = footer.textGeneratorMap.time(footer)
         local page_count = readerui.document:getPageCount()
         -- stats has not been initialized here, so we get na TB and TC
@@ -174,10 +184,11 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_pdf))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local footer = readerui.view.footer
-        readerui.view.footer:updateFooter()
+        readerui.view.footer:onUpdateFooter()
         local timeinfo = readerui.view.footer.textGeneratorMap.time(footer)
         assert.are.same('1 / 2 | '..timeinfo..' | ⇒ 1 | 0% | ⤠ 50% | ⏳ na | ⤻ na',
                         readerui.view.footer.footer_text.text)
@@ -189,13 +200,14 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_pdf))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local fake_menu = {setting = {}}
         local footer = readerui.view.footer
         footer:addToMainMenu(fake_menu)
         footer:resetLayout()
-        footer:updateFooter()
+        footer:onUpdateFooter()
         local timeinfo = footer.textGeneratorMap.time(footer)
         assert.are.same('1 / 2 | '..timeinfo..' | ⇒ 1 | 0% | ⤠ 50% | ⏳ na | ⤻ na',
                         footer.footer_text.text)
@@ -240,6 +252,7 @@ describe("Readerfooter module", function()
     it("should rotate through different modes", function()
         local sample_pdf = "spec/front/unit/data/2col.pdf"
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local footer = readerui.view.footer
@@ -281,11 +294,12 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_pdf))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local footer = readerui.view.footer
         local horizontal_margin = Screen:scaleBySize(10)*2
-        footer:updateFooter()
+        footer:onUpdateFooter()
         assert.is.same(354, footer.text_width)
         assert.is.same(600, footer.progress_bar.width
                             + footer.text_width
@@ -309,6 +323,7 @@ describe("Readerfooter module", function()
         os.remove(DocSettings:getHistoryPath(sample_epub))
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -331,6 +346,7 @@ describe("Readerfooter module", function()
         })
 
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -357,6 +373,7 @@ describe("Readerfooter module", function()
             auto_refresh_time = true,
         })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -391,6 +408,7 @@ describe("Readerfooter module", function()
             auto_refresh_time = true,
         })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -416,6 +434,7 @@ describe("Readerfooter module", function()
             auto_refresh_time = true,
         })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local footer = readerui.view.footer
@@ -469,6 +488,7 @@ describe("Readerfooter module", function()
             time = true,
         })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local footer = readerui.view.footer
@@ -508,6 +528,7 @@ describe("Readerfooter module", function()
             pages_left = true,
         })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf),
         }
         local footer = readerui.view.footer
@@ -539,6 +560,7 @@ describe("Readerfooter module", function()
             pages_left = true,
         })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_pdf)
         }
         local footer = readerui.view.footer
@@ -557,6 +579,7 @@ describe("Readerfooter module", function()
         assert.are.same({}, UIManager._task_queue)
         G_reader_settings:saveSetting("footer", {})
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -593,6 +616,7 @@ describe("Readerfooter module", function()
         G_reader_settings:saveSetting("reader_footer_mode", 2)
         G_reader_settings:saveSetting("footer", { time = true })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -611,6 +635,7 @@ describe("Readerfooter module", function()
         G_reader_settings:saveSetting("reader_footer_mode", 1)
         G_reader_settings:saveSetting("footer", {})
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -629,6 +654,7 @@ describe("Readerfooter module", function()
         G_reader_settings:saveSetting("reader_footer_mode", 1)
         G_reader_settings:saveSetting("footer", {disable_progress_bar = true})
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -645,6 +671,7 @@ describe("Readerfooter module", function()
 
         G_reader_settings:saveSetting("footer", { disabled = true })
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_epub),
         }
         local footer = readerui.view.footer
@@ -657,6 +684,7 @@ describe("Readerfooter module", function()
     it("should toggle between full and min progress bar for cre documents", function()
         local sample_txt = "spec/front/unit/data/sample.txt"
         local readerui = ReaderUI:new{
+            dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument(sample_txt),
         }
         local footer = readerui.view.footer

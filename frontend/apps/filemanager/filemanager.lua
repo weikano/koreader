@@ -5,6 +5,7 @@ local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
+local DeviceListener = require("device/devicelistener")
 local DocSettings = require("docsettings")
 local DocumentRegistry = require("document/documentregistry")
 local Event = require("ui/event")
@@ -47,20 +48,6 @@ local C_ = _.pgettext
 local Screen = Device.screen
 local T = require("ffi/util").template
 
-local function restoreScreenMode()
-    --- @todo: Not Yet Implemented. Layout is currently broken in Landscape.
-    local screen_mode = G_reader_settings:readSetting("fm_screen_mode") or "portrait"
-    --- @note: Basically, if we were already in Portrait/Inverted Portrait, don't mess with it,
-    --         as the FM supports it.
-    --         See setScreenMode in base's ffi/framebuffer.lua for the gory details.
-    --         See also ReaderView:onSetScreenMode in apps/reader/modules/readerview.lua for a similar logic,
-    --         if we ever need to add Landscape to the mix.
-    --         c.f., https://github.com/koreader/koreader/issues/5772#issuecomment-577242365
-    if Screen:getScreenMode() ~= screen_mode then
-        Screen:setScreenMode(screen_mode)
-    end
-end
-
 local FileManager = InputContainer:extend{
     title = _("KOReader"),
     root_path = lfs.currentdir(),
@@ -70,6 +57,30 @@ local FileManager = InputContainer:extend{
     cp_bin = Device:isAndroid() and "/system/bin/cp" or "/bin/cp",
     mkdir_bin =  Device:isAndroid() and "/system/bin/mkdir" or "/bin/mkdir",
 }
+
+function FileManager:onSetRotationMode(rotation)
+    if rotation ~= nil and rotation ~= Screen:getRotationMode() then
+        Screen:setRotationMode(rotation)
+        if self.instance then
+            self:reinit(self.instance.path, self.instance.focused_file)
+            UIManager:setDirty(self.instance.banner, function()
+                return "ui", self.instance.banner.dimen
+            end)
+        end
+    end
+    return true
+end
+
+-- init should be set to True when starting the FM for the first time
+-- (not coming from the reader). This allows the default to be properly set.
+function FileManager:setRotationMode(init)
+    local locked = G_reader_settings:isTrue("lock_rotation")
+    local rotation_mode = G_reader_settings:readSetting("fm_rotation_mode") or Screen.ORIENTATION_PORTRAIT
+    -- Only enforce the default rotation on first FM open, or when switching to the FM when sticky rota is disabled.
+    if init or not locked then
+        self:onSetRotationMode(rotation_mode)
+    end
+end
 
 function FileManager:init()
     if Device:isTouchDevice() then
@@ -234,7 +245,7 @@ function FileManager:init()
                             ok_text = _("Purge"),
                             ok_callback = function()
                                 filemanagerutil.purgeSettings(file)
-                                filemanagerutil.removeFileFromHistoryIfWanted(file)
+                                require("readhistory"):fileSettingsPurged(file)
                                 self:refreshPath()
                                 UIManager:close(self.file_dialog)
                             end,
@@ -258,8 +269,7 @@ function FileManager:init()
                             ok_text = _("Delete"),
                             ok_callback = function()
                                 deleteFile(file)
-                                filemanagerutil.removeFileFromHistoryIfWanted(file)
-                                filemanagerutil.ensureLastFileExists()
+                                require("readhistory"):fileDeleted(file)
                                 self:refreshPath()
                                 UIManager:close(self.file_dialog)
                             end,
@@ -302,7 +312,7 @@ function FileManager:init()
             },
         }
 
-        if not Device:isAndroid() and lfs.attributes(file, "mode") == "file" and util.isAllowedScript(file) then
+        if lfs.attributes(file, "mode") == "file" and Device:canExecuteScript(file) then
             -- NOTE: We populate the empty separator, in order not to mess with the button reordering code in CoverMenu
             table.insert(buttons[3],
                 {
@@ -317,7 +327,14 @@ function FileManager:init()
                         }
                         UIManager:show(script_is_running_msg)
                         UIManager:scheduleIn(0.5, function()
-                            local rv = os.execute(BaseUtil.realpath(file))
+                            local rv
+                            if Device:isAndroid() then
+                                Device:setIgnoreInput(true)
+                                rv = os.execute("sh " .. BaseUtil.realpath(file)) -- run by sh, because sdcard has no execute permissions
+                                Device:setIgnoreInput(false)
+                            else
+                                rv = os.execute(BaseUtil.realpath(file))
+                            end
                             UIManager:close(script_is_running_msg)
                             if rv == 0 then
                                 UIManager:show(InfoMessage:new{
@@ -447,6 +464,7 @@ function FileManager:init()
     table.insert(self, ReaderDictionary:new{ ui = self })
     table.insert(self, ReaderWikipedia:new{ ui = self })
     table.insert(self, ReaderDeviceStatus:new{ ui = self })
+    table.insert(self, DeviceListener:new{ ui = self })
 
     -- koreader plugins
     for _,plugin_module in ipairs(PluginLoader:loadPlugins()) do
@@ -466,6 +484,11 @@ function FileManager:init()
 
     if Device:isTouchDevice() then
         table.insert(self, ReaderGesture:new{ ui = self })
+    end
+
+    if Device:hasWifiToggle() then
+        local NetworkListener = require("ui/network/networklistener")
+        table.insert(self, NetworkListener:new{ ui = self })
     end
 
     if Device:hasKeys() then
@@ -642,6 +665,12 @@ function FileManager:reinit(path, focused_file)
     -- self:onRefresh()
 end
 
+function FileManager:getCurrentDir()
+    if self.instance then
+        return self.instance.file_chooser.path
+    end
+end
+
 function FileManager:toggleHiddenFiles()
     self.file_chooser:toggleHiddenFiles()
     G_reader_settings:saveSetting("show_hidden", self.file_chooser.show_hidden)
@@ -680,6 +709,10 @@ end
 
 function FileManager:goHome()
     local home_dir = G_reader_settings:readSetting("home_dir")
+    if not home_dir or lfs.attributes(home_dir, "mode") ~= "directory"  then
+        -- Try some sane defaults, depending on platform
+        home_dir = Device.home_dir
+    end
     if home_dir then
         -- Jump to the first page if we're already home
         if self.file_chooser.path and home_dir == self.file_chooser.path then
@@ -688,28 +721,7 @@ function FileManager:goHome()
             self.file_chooser:changeToPath(home_dir)
         end
     else
-        -- Try some sane defaults, depending on platform
-        if Device:isKindle() then
-            home_dir = "/mnt/us"
-        elseif Device:isKobo() then
-            home_dir = "/mnt/onboard"
-        elseif Device:isPocketBook() then
-            home_dir = "/mnt/ext1"
-        elseif Device:isCervantes() then
-            home_dir = "/mnt/public"
-        elseif Device:isAndroid() then
-            home_dir = Device.external_storage()
-        end
-
-        if home_dir then
-            if self.file_chooser.path and home_dir == self.file_chooser.path then
-                self.file_chooser:onGotoPage(1)
-            else
-                self.file_chooser:changeToPath(home_dir)
-            end
-        else
-            self:setHome()
-        end
+        self:setHome()
     end
     return true
 end
@@ -794,12 +806,8 @@ function FileManager:pasteHere(file)
             if self:moveFile(orig, dest) then
                 -- Update history and collections.
                 local dest_file = string.format("%s/%s", dest, BaseUtil.basename(orig))
-                require("readhistory"):updateItemByPath(orig, dest_file)
+                require("readhistory"):updateItemByPath(orig, dest_file) -- (will update "lastfile" if needed)
                 ReadCollection:updateItemByPath(orig, dest_file)
-                -- Update last open file.
-                if G_reader_settings:readSetting("lastfile") == orig then
-                    G_reader_settings:saveSetting("lastfile", dest_file)
-                end
                 UIManager:show(InfoMessage:new {
                     text = T(_("Moved to: %1"), BD.dirpath(dest)),
                     timeout = 2,
@@ -904,6 +912,7 @@ function FileManager:renameFile(file)
     if BaseUtil.basename(file) ~= self.rename_dialog:getInputText() then
         local dest = BaseUtil.joinPath(BaseUtil.dirname(file), self.rename_dialog:getInputText())
         if self:moveFile(file, dest) then
+            require("readhistory"):updateItemByPath(file, dest) -- (will update "lastfile" if needed)
             ReadCollection:updateItemByPath(file, dest)
             if lfs.attributes(dest, "mode") == "file" then
                 local doc = require("docsettings")
@@ -942,6 +951,7 @@ function FileManager:getSortingMenuTable()
     local fm = self
     local collates = {
         strcoll = {_("filename"), _("Sort by filename")},
+        numeric = {_("numeric"), _("Sort by filename (natural sorting)")},
         strcoll_mixed = {_("name mixed"), _("Sort by name – mixed files and folders")},
         access = {_("date read"), _("Sort by last read date")},
         change = {_("date added"), _("Sort by date added")},
@@ -983,6 +993,7 @@ function FileManager:getSortingMenuTable()
             set_collate_table("modification"),
             set_collate_table("size"),
             set_collate_table("type"),
+            set_collate_table("numeric"),
             {
                 text_func =  get_collate_percent,
                 checked_func = function()
@@ -1037,7 +1048,7 @@ end
 function FileManager:showFiles(path, focused_file)
     path = path or G_reader_settings:readSetting("lastdir") or filemanagerutil.getDefaultDir()
     G_reader_settings:saveSetting("lastdir", path)
-    restoreScreenMode()
+    self:setRotationMode()
     local file_manager = FileManager:new{
         dimen = Screen:getSize(),
         covers_fullscreen = true, -- hint for UIManager:_repaint()
@@ -1051,12 +1062,22 @@ function FileManager:showFiles(path, focused_file)
     self.instance = file_manager
 end
 
---[[
-A shortcut to execute mv command (self.mv_bin) with from and to as parameters.
-Returns a boolean value to indicate the result of mv command.
---]]
+--- A shortcut to execute mv.
+-- @treturn boolean result of mv command
 function FileManager:moveFile(from, to)
     return BaseUtil.execute(self.mv_bin, from, to) == 0
+end
+
+--- A shortcut to execute cp.
+-- @treturn boolean result of cp command
+function FileManager:copyFileFromTo(from, to)
+    return BaseUtil.execute(self.cp_bin, from, to) == 0
+end
+
+--- A shortcut to execute cp recursively.
+-- @treturn boolean result of cp command
+function FileManager:copyRecursive(from, to)
+    return BaseUtil.execute(self.cp_bin, "-r", from, to ) == 0
 end
 
 function FileManager:onHome()

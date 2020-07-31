@@ -21,7 +21,6 @@ local Send2Ebook = WidgetContainer:new{
 }
 
 local initialized = false
-local wifi_enabled_before_action = true
 local send2ebook_config_file = "send2ebook_settings.lua"
 local config_key_custom_dl_dir = "custom_dl_dir";
 local default_download_dir_name = "send2ebook"
@@ -45,13 +44,6 @@ function Send2Ebook:downloadFileAndRemove(connection_url, remote_path, local_dow
     end
 end
 
---- @todo Implement as NetworkMgr:afterWifiAction with configuration options.
-function Send2Ebook:afterWifiAction()
-    if not wifi_enabled_before_action then
-        NetworkMgr:promptWifiOff()
-    end
-end
-
 function Send2Ebook:init()
     self.ui.menu:registerToMainMenu(self)
 end
@@ -65,17 +57,18 @@ function Send2Ebook:addToMainMenu(menu_items)
                 text = _("Download and remove from server"),
                 keep_menu_open = true,
                 callback = function()
-                  if not NetworkMgr:isOnline() then
-                      wifi_enabled_before_action = false
-                      NetworkMgr:beforeWifiAction(self.process)
-                  else
-                      self:process()
-                  end
+                    local connect_callback = function()
+                        self:process()
+                    end
+                    NetworkMgr:runWhenOnline(connect_callback)
                 end,
             },
             {
                 text = _("Go to download folder"),
                 callback = function()
+                    if self.ui.document then
+                        self.ui:onClose()
+                    end
                     local FileManager = require("apps/filemanager/filemanager")
                     if FileManager.instance then
                         FileManager.instance:reinit(download_dir_path)
@@ -168,7 +161,7 @@ function Send2Ebook:process()
           end
     end
     UIManager:show(info)
-    Send2Ebook:afterWifiAction()
+    NetworkMgr:afterWifiAction()
 end
 
 function Send2Ebook:removeReadActicles()
@@ -224,6 +217,7 @@ function Send2Ebook:onCloseDocument()
         logger.dbg("Send2Ebook: download_dir_path:", download_dir_path)
         logger.dbg("Send2Ebook: removing Send2Ebook file from history.")
         ReadHistory:removeItemByPath(document_full_path)
+        self.ui:setLastDirForFileBrowser(download_dir_path)
     end
 end
 

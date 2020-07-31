@@ -27,11 +27,10 @@ if Device:isCervantes() then
 end
 
 if Device:hasFrontlight() then
-    local ReaderFrontLight = require("apps/reader/modules/readerfrontlight")
     common_settings.frontlight = {
         text = _("Frontlight"),
         callback = function()
-            ReaderFrontLight:onShowFlDialog()
+            UIManager:broadcastEvent(Event:new("ShowFlDialog"))
         end,
     }
 end
@@ -166,10 +165,7 @@ common_settings.night_mode = {
     text = _("Night mode"),
     checked_func = function() return G_reader_settings:isTrue("night_mode") end,
     callback = function()
-        local night_mode = G_reader_settings:isTrue("night_mode")
-        Screen:toggleNightMode()
-        UIManager:setDirty(nil, "full")
-        G_reader_settings:saveSetting("night_mode", not night_mode)
+        UIManager:broadcastEvent(Event:new("ToggleNightMode"))
     end
 }
 common_settings.network = {
@@ -180,6 +176,7 @@ NetworkMgr:getMenuTable(common_settings)
 common_settings.screen = {
     text = _("Screen"),
 }
+common_settings.screen_rotation = require("ui/elements/screen_rotation_menu_table")
 common_settings.screen_dpi = require("ui/elements/screen_dpi_menu_table")
 common_settings.screen_eink_opt = require("ui/elements/screen_eink_opt_menu_table")
 common_settings.menu_activate = require("ui/elements/menu_activate")
@@ -194,10 +191,6 @@ common_settings.ignore_hold_corners = {
     end,
 }
 
-if Device:canToggleGSensor() then
-    common_settings.screen_toggle_gsensor = require("ui/elements/screen_toggle_gsensor")
-end
-
 -- NOTE: Allow disabling color if it's mistakenly enabled on a Grayscale screen (after a settings import?)
 if Screen:isColorEnabled() or Screen:isColorScreen() then
     common_settings.color_rendering = require("ui/elements/screen_color_menu_table")
@@ -210,6 +203,16 @@ if Device:isAndroid() then
 
     -- screen timeout options, disabled if device needs wakelocks.
     common_settings.screen_timeout = require("ui/elements/screen_android"):getTimeoutMenuTable()
+
+    -- haptic feedback override
+    common_settings.android_haptic_feedback = {
+        text = _("Force haptic feedback"),
+        checked_func = function() return G_reader_settings:isTrue("haptic_feedback_override") end,
+        callback = function()
+            G_reader_settings:flipNilOrFalse("haptic_feedback_override")
+            android.setHapticOverride(G_reader_settings:isTrue("haptic_feedback_override"))
+        end,
+    }
 
     -- volume key events
     common_settings.android_volume_keys = {
@@ -227,6 +230,16 @@ if Device:isAndroid() then
         text = _("Camera key toggles touchscreen support"),
         checked_func = function() return G_reader_settings:isTrue("camera_key_toggles_touchscreen") end,
         callback = function() G_reader_settings:flipNilOrFalse("camera_key_toggles_touchscreen") end,
+    }
+
+    common_settings.android_back_button = {
+        text = _("Ignore back button completely"),
+        checked_func = function() return android.isBackButtonIgnored() end,
+        callback = function()
+            local is_ignored = android.isBackButtonIgnored()
+            android.setBackButtonIgnored(not is_ignored)
+            G_reader_settings:saveSetting("android_ignore_back_button", not is_ignored)
+        end,
     }
 
     -- fullscreen toggle on devices with compatible fullscreen methods (apis 14-18)
@@ -396,7 +409,7 @@ common_settings.document = {
                 local interval = G_reader_settings:readSetting("auto_save_settings_interval_minutes")
                 local s_interval
                 if interval == false then
-                    s_interval = "only on close"
+                    s_interval = _("only on close")
                 else
                     s_interval = T(N_("every 1 m", "every %1 m", interval), interval)
                 end
@@ -455,6 +468,16 @@ common_settings.document = {
         {
             text = _("End of document action"),
             sub_item_table = {
+                {
+                    text = _("Always mark as read"),
+                    checked_func = function()
+                        return G_reader_settings:isTrue("end_document_auto_mark")
+                    end,
+                    callback = function()
+                        G_reader_settings:flipNilOrFalse("end_document_auto_mark")
+                    end,
+                    separator = true,
+                },
                 {
                     text = _("Ask with pop-up dialog"),
                     checked_func = function()
@@ -547,6 +570,16 @@ common_settings.document = {
             text = _("Highlight action"),
             sub_item_table = {
                 {
+                    text = _("Enable on single word selection"),
+                    checked_func = function()
+                        return G_reader_settings:isTrue("highlight_action_on_single_word")
+                    end,
+                    callback = function()
+                        G_reader_settings:flipNilOrFalse("highlight_action_on_single_word")
+                    end,
+                    separator = true,
+                },
+                {
                     text = _("Ask with popup dialog"),
                     checked_func = function()
                         return G_reader_settings:nilOrFalse("default_highlight_action")
@@ -580,6 +613,24 @@ common_settings.document = {
                     end,
                     callback = function()
                         G_reader_settings:saveSetting("default_highlight_action", "wikipedia")
+                    end,
+                },
+                {
+                    text = _("Dictionary"),
+                    checked_func = function()
+                        return G_reader_settings:readSetting("default_highlight_action") == "dictionary"
+                    end,
+                    callback = function()
+                        G_reader_settings:saveSetting("default_highlight_action", "dictionary")
+                    end,
+                },
+                {
+                    text = _("Fulltext search"),
+                    checked_func = function()
+                        return G_reader_settings:readSetting("default_highlight_action") == "search"
+                    end,
+                    callback = function()
+                        G_reader_settings:saveSetting("default_highlight_action", "search")
                     end,
                 },
             }

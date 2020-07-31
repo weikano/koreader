@@ -132,6 +132,9 @@ function VirtualKey:init()
             local key_function = self.key_chars[ges.direction.."_func"]
 
             if not key_function and key_string then
+                if type(key_string) == "table" and key_string.key then
+                    key_string = key_string.key
+                end
                 self.keyboard:addChar(key_string)
             elseif key_function then
                 key_function()
@@ -657,6 +660,7 @@ local VirtualKeyboard = FocusManager:new{
 
     lang_to_keyboard_layout = {
         ar_AA = "ar_AA_keyboard",
+        de = "de_keyboard",
         el = "el_keyboard",
         en = "en_keyboard",
         es = "es_keyboard",

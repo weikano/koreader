@@ -8,6 +8,7 @@ local BD = require("ui/bidi")
 local Cache = require("cache")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
+local DeviceListener = require("device/devicelistener")
 local DocSettings = require("docsettings")
 local DocumentRegistry = require("document/documentregistry")
 local Event = require("ui/event")
@@ -29,15 +30,14 @@ local ReaderCropping = require("apps/reader/modules/readercropping")
 local ReaderDeviceStatus = require("apps/reader/modules/readerdevicestatus")
 local ReaderDictionary = require("apps/reader/modules/readerdictionary")
 local ReaderFont = require("apps/reader/modules/readerfont")
-local ReaderFrontLight = require("apps/reader/modules/readerfrontlight")
 local ReaderGesture = require("apps/reader/modules/readergesture")
 local ReaderGoto = require("apps/reader/modules/readergoto")
 local ReaderHinting = require("apps/reader/modules/readerhinting")
 local ReaderHighlight = require("apps/reader/modules/readerhighlight")
-local ReaderHyphenation = require("apps/reader/modules/readerhyphenation")
 local ReaderKoptListener = require("apps/reader/modules/readerkoptlistener")
 local ReaderLink = require("apps/reader/modules/readerlink")
 local ReaderMenu = require("apps/reader/modules/readermenu")
+local ReaderPageMap = require("apps/reader/modules/readerpagemap")
 local ReaderPanning = require("apps/reader/modules/readerpanning")
 local ReaderRotation = require("apps/reader/modules/readerrotation")
 local ReaderPaging = require("apps/reader/modules/readerpaging")
@@ -47,6 +47,7 @@ local ReaderStatus = require("apps/reader/modules/readerstatus")
 local ReaderStyleTweak = require("apps/reader/modules/readerstyletweak")
 local ReaderToc = require("apps/reader/modules/readertoc")
 local ReaderTypeset = require("apps/reader/modules/readertypeset")
+local ReaderTypography = require("apps/reader/modules/readertypography")
 local ReaderView = require("apps/reader/modules/readerview")
 local ReaderWikipedia = require("apps/reader/modules/readerwikipedia")
 local ReaderZooming = require("apps/reader/modules/readerzooming")
@@ -186,14 +187,6 @@ function ReaderUI:init()
         view = self.view,
         ui = self
     }, true)
-    -- frontlight controller
-    if Device:hasFrontlight() then
-        self:registerModule("frontlight", ReaderFrontLight:new{
-            dialog = self.dialog,
-            view = self.view,
-            ui = self
-        })
-    end
     -- device status controller
     self:registerModule("battery", ReaderDeviceStatus:new{
         ui = self,
@@ -306,8 +299,8 @@ function ReaderUI:init()
             view = self.view,
             ui = self
         })
-        -- hyphenation menu
-        self:registerModule("hyphenation", ReaderHyphenation:new{
+        -- typography menu (replaces previous hyphenation menu / ReaderHyphenation)
+        self:registerModule("typography", ReaderTypography:new{
             dialog = self.dialog,
             view = self.view,
             ui = self
@@ -319,8 +312,14 @@ function ReaderUI:init()
             view = self.view,
             ui = self
         })
-        self.disable_double_tap = G_reader_settings:readSetting("disable_double_tap") ~= false
+        -- pagemap controller
+        self:registerModule("pagemap", ReaderPageMap:new{
+            dialog = self.dialog,
+            view = self.view,
+            ui = self
+        })
     end
+    self.disable_double_tap = G_reader_settings:readSetting("disable_double_tap") ~= false
     -- back location stack
     self:registerModule("back", ReaderBack:new{
         ui = self,
@@ -364,6 +363,12 @@ function ReaderUI:init()
         document = self.document,
         ui = self,
     })
+    -- event listener to change device settings
+    self:registerModule("devicelistener", DeviceListener:new {
+        document = self.document,
+        view = self.view,
+        ui = self,
+    })
     -- koreader plugins
     for _, plugin_module in ipairs(PluginLoader:loadPlugins()) do
         local ok, plugin_or_err = PluginLoader:createPluginInstance(
@@ -383,6 +388,15 @@ function ReaderUI:init()
     if Device:isTouchDevice() then
         -- gesture manager
         self:registerModule("gesture", ReaderGesture:new {
+            document = self.document,
+            view = self.view,
+            ui = self,
+        })
+    end
+
+    if Device:hasWifiToggle() then
+        local NetworkListener = require("ui/network/networklistener")
+        self:registerModule("networklistener", NetworkListener:new {
             document = self.document,
             view = self.view,
             ui = self,
@@ -421,7 +435,19 @@ function ReaderUI:init()
     -- end
 end
 
-function ReaderUI:getLastDirFile()
+function ReaderUI:setLastDirForFileBrowser(dir)
+    if dir and #dir > 1 and dir:sub(-1) == "/" then
+        dir = dir:sub(1, -2)
+    end
+    self.last_dir_for_file_browser = dir
+end
+
+function ReaderUI:getLastDirFile(to_file_browser)
+    if to_file_browser and self.last_dir_for_file_browser then
+        local dir = self.last_dir_for_file_browser
+        self.last_dir_for_file_browser = nil
+        return dir
+    end
     local QuickStart = require("ui/quickstart")
     local last_dir
     local last_file = G_reader_settings:readSetting("lastfile")
@@ -440,7 +466,7 @@ function ReaderUI:showFileManager(file)
         last_dir, last_file = util.splitFilePathName(file)
         last_dir = last_dir:match("(.*)/")
     else
-        last_dir, last_file = self:getLastDirFile()
+        last_dir, last_file = self:getLastDirFile(true)
     end
     if FileManager.instance then
         FileManager.instance:reinit(last_dir, last_file)
@@ -543,8 +569,7 @@ function ReaderUI:doShowReader(file, provider)
             end
         end
     end
-    require("readhistory"):addItem(file)
-    G_reader_settings:saveSetting("lastfile", file)
+    require("readhistory"):addItem(file) -- (will update "lastfile")
     local reader = ReaderUI:new{
         dimen = Screen:getSize(),
         covers_fullscreen = true, -- hint for UIManager:_repaint()
@@ -697,11 +722,7 @@ function ReaderUI:dealWithLoadDocumentFailure()
     -- We must still remove it from lastfile and history (as it has
     -- already been added there) so that koreader don't crash again
     -- at next launch...
-    local readhistory = require("readhistory")
-    readhistory:removeItemByPath(self.document.file)
-    if G_reader_settings:readSetting("lastfile") == self.document.file then
-        G_reader_settings:saveSetting("lastfile", #readhistory.hist > 0 and readhistory.hist[1].file or nil)
-    end
+    require("readhistory"):removeItemByPath(self.document.file) -- (will update "lastfile")
     -- As we are in a coroutine, we can pause and show an InfoMessage before exiting
     local _coroutine = coroutine.running()
     if coroutine then
@@ -745,6 +766,10 @@ function ReaderUI:switchDocument(new_file)
     self.highlight:onClose() -- close highlight dialog if any
     self:onClose(false)
     self:showReader(new_file)
+end
+
+function ReaderUI:onOpenLastDoc()
+    self:switchDocument(self.menu:getPreviousFile())
 end
 
 function ReaderUI:getCurrentPage()

@@ -6,7 +6,7 @@ Example:
     local Foo = TextBoxWidget:new{
         face = Font:getFace("cfont", 25),
         text = 'We can show multiple lines.\nFoo.\nBar.',
-        -- width = Screen:getWidth()*2/3,
+        -- width = math.floor(Screen:getWidth() * 2/3),
     }
     UIManager:show(Foo)
 
@@ -310,6 +310,15 @@ function TextBoxWidget:_splitToLines()
             --   which is a bit strange but that's what the use_xtext=false does.
             -- - Between a line end_offset= and the next line offset=, there may be only
             --   a single indice not included: the \n or the space that allowed the break.
+            --
+            if line.next_start_offset and line.next_start_offset == line.offset then
+                -- No char could fit (too small targeted_width)
+                -- makeLine 6509 { ["offset"] = 1, ["end_offset"] = 0, ["next_start_offset"] = 1,
+                -- ["width"] = 0, ["targeted_width"] = 7, ["no_allowed_break_met"] = true, ["can_be_justified"] = true
+                -- Make one char on this line
+                line.next_start_offset = line.offset + 1
+                line.width = targeted_width
+            end
             self.vertical_string_list[ln] = line
             if line.no_allowed_break_met then
                 -- let the fact a long word was splitted be known
@@ -784,7 +793,7 @@ function TextBoxWidget:_renderText(start_row_idx, end_row_idx)
                         end
                         self._bb:colorblitFrom(glyph.bb,
                                     xglyph.x0 + glyph.l + xglyph.x_offset,
-                                    y - glyph.t + xglyph.y_offset,
+                                    y - glyph.t - xglyph.y_offset,
                                     0, 0, glyph.bb:getWidth(), glyph.bb:getHeight(), color)
                     end
                 end

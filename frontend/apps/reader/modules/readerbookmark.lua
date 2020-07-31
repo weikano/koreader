@@ -215,13 +215,48 @@ function ReaderBookmark:gotoBookmark(pn_or_xp)
     end
 end
 
+-- This function adds "chapter" property to highlights already saved in the document
+function ReaderBookmark:updateHighlightsIfNeeded()
+    local version = self.ui.doc_settings:readSetting("bookmarks_version") or 0
+    if version >= 20200615 then
+        return
+    end
+
+    for page, highlights in pairs(self.view.highlight.saved) do
+        for _, highlight in pairs(highlights) do
+            local pg_or_xp = self.ui.document.info.has_pages and
+                    page or highlight.pos0
+            local chapter_name = self.ui.toc:getTocTitleByPage(pg_or_xp)
+            highlight.chapter = chapter_name
+        end
+    end
+
+    for _, bookmark in ipairs(self.bookmarks) do
+        if bookmark.pos0 then
+            local pg_or_xp = self.ui.document.info.has_pages and
+                    bookmark.page or bookmark.pos0
+                local chapter_name = self.ui.toc:getTocTitleByPage(pg_or_xp)
+            bookmark.chapter = chapter_name
+        elseif bookmark.page then -- dogear bookmark
+            local chapter_name = self.ui.toc:getTocTitleByPage(bookmark.page)
+            bookmark.chapter = chapter_name
+        end
+    end
+    self.ui.doc_settings:saveSetting("bookmarks_version", 20200615)
+end
+
 function ReaderBookmark:onShowBookmark()
+    self:updateHighlightsIfNeeded()
     -- build up item_table
     for k, v in ipairs(self.bookmarks) do
         local page = v.page
         -- for CREngine, bookmark page is xpointer
         if not self.ui.document.info.has_pages then
-            page = self.ui.document:getPageFromXPointer(page)
+            if self.ui.pagemap and self.ui.pagemap:wantsPageLabels() then
+                page = self.ui.pagemap:getXPointerPageLabel(page, true)
+            else
+                page = self.ui.document:getPageFromXPointer(page)
+            end
         end
         if v.text == nil or v.text == "" then
             v.text = T(_("Page %1 %2 @ %3"), page, v.notes, v.datetime)
@@ -458,6 +493,7 @@ function ReaderBookmark:updateBookmark(item)
                                         new_text,
                                         item.updated_highlight.datetime)
             self.bookmarks[i].datetime = item.updated_highlight.datetime
+            self.bookmarks[i].chapter = item.updated_highlight.chapter
             self:onSaveSettings()
         end
     end
@@ -534,13 +570,16 @@ function ReaderBookmark:toggleBookmark(pn_or_xp)
     else
         -- build notes from TOC
         local notes = self.ui.toc:getTocTitleByPage(pn_or_xp)
+        local chapter_name = notes
         if notes ~= "" then
-            notes = "in "..notes
+            -- @translators In which chapter title (%1) a note is found.
+            notes = T(_("in %1"), notes)
         end
         self:addBookmark({
             page = pn_or_xp,
             datetime = os.date("%Y-%m-%d %H:%M:%S"),
             notes = notes,
+            chapter = chapter_name
         })
     end
 end
@@ -609,12 +648,18 @@ function ReaderBookmark:onGotoNextBookmark(pn_or_xp)
     return true
 end
 
-function ReaderBookmark:onGotoNextBookmarkFromPage()
+function ReaderBookmark:onGotoNextBookmarkFromPage(add_current_location_to_stack)
+    if add_current_location_to_stack ~= false then -- nil or true
+        self.ui.link:addCurrentLocationToStack()
+    end
     self:gotoBookmark(self:getNextBookmarkedPageFromPage(self.ui:getCurrentPage()))
     return true
 end
 
-function ReaderBookmark:onGotoPreviousBookmarkFromPage()
+function ReaderBookmark:onGotoPreviousBookmarkFromPage(add_current_location_to_stack)
+    if add_current_location_to_stack ~= false then -- nil or true
+        self.ui.link:addCurrentLocationToStack()
+    end
     self:gotoBookmark(self:getPreviousBookmarkedPageFromPage(self.ui:getCurrentPage()))
     return true
 end
@@ -633,6 +678,24 @@ end
 
 function ReaderBookmark:hasBookmarks()
     return self.bookmarks and #self.bookmarks > 0
+end
+
+function ReaderBookmark:getNumberOfHighlightsAndNotes()
+    local highlights = 0
+    local notes = 0
+    for i = 1, #self.bookmarks do
+        if self.bookmarks[i].highlighted then
+            highlights = highlights + 1
+            -- No real way currently to know which highlights
+            -- have been edited and became "notes". Editing them
+            -- adds this 'text' field, but just showing bookmarks
+            -- do that as well...
+            if self.bookmarks[i].text then
+                notes = notes + 1
+            end
+        end
+    end
+    return highlights, notes
 end
 
 return ReaderBookmark

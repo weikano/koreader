@@ -2,7 +2,7 @@ local DocumentRegistry = require("document/documentregistry")
 local DocSettings = require("docsettings")
 local ReadHistory = require("readhistory")
 local logger = require("logger")
-local md5 = require("ffi/MD5")
+local md5 = require("ffi/sha2").md5
 local util = require("util")
 
 local MyClipping = {
@@ -222,7 +222,7 @@ function MyClipping:getImage(image)
         --doc:clipPagePNGFile(image.pos0, image.pos1,
                 --image.pboxes, image.drawer, "/tmp/"..md5(png)..".png")
         doc:close()
-        if png then return { png = png, hash = md5.sum(png) } end
+        if png then return { png = png, hash = md5(png) } end
     end
 end
 
@@ -235,6 +235,7 @@ function MyClipping:parseHighlight(highlights, bookmarks, book)
             clipping.sort = "highlight"
             clipping.time = self:getTime(item.datetime or "")
             clipping.text = self:getText(item.text)
+            clipping.chapter = item.chapter
             for _, bookmark in pairs(bookmarks) do
                 if bookmark.datetime == item.datetime and bookmark.text then
                     local tmp = string.gsub(bookmark.text, "Page %d+ ", "")
@@ -324,4 +325,3 @@ function MyClipping:parseCurrentDoc(view)
 end
 
 return MyClipping
-

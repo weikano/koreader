@@ -5,54 +5,27 @@ local _ = require("gettext")
 
 --[[ Font settings for desktop linux, mac and android ]]--
 
-local ANDROID_SYSTEM_FONT_DIR = "/system/fonts"
-local LINUX_SYSTEM_FONT_DIR = "/usr/share/fonts"
-local DESKTOP_USER_FONT_DIR = "/.local/share/fonts"
-
--- get primary storage on Android
-local function getAndroidPrimaryStorage()
-    local A, android = pcall(require, "android")
-    if not A then return end
-    local path = android.getExternalStoragePath()
-    if path ~= "Unknown" then
-        -- use the external storage identified by the app
-        return path
-    else
-        -- unable to identify external storage. Use defaults
-        return "/sdcard"
+local function getDir(isUser)
+    local home = Device.home_dir
+    if isUser and not home then return end
+    if Device:isAndroid() then
+        if isUser then
+            return home .. "/fonts;" .. home .. "/koreader/fonts"
+        else
+            return "/system/fonts"
+        end
+    elseif Device:isDesktop() or Device:isEmulator() then
+        if jit.os == "OSX" then
+            return isUser and home .. "/Library/fonts" or "/Library/fonts"
+        else
+            return isUser and home .. "/.local/share/fonts" or "/usr/share/fonts"
+        end
     end
-end
-
--- user font path, should be rw. On linux/mac it goes under $HOME.
--- on Android it goes in the primary storage (internal/sd)
-local function getUserDir()
-    if Device:isDesktop() then
-        local home = os.getenv("HOME")
-        if home then return home..DESKTOP_USER_FONT_DIR end
-    elseif Device:isAndroid() then
-        local p = getAndroidPrimaryStorage()
-        return p.."/koreader/fonts;"..p.."/fonts"
-    end
-end
-
--- system (ttf) fonts are available on linux and android but not on mac
-local function getSystemDir()
-    if Device:isDesktop() then
-        if util.pathExists(LINUX_SYSTEM_FONT_DIR) then
-            return LINUX_SYSTEM_FONT_DIR
-        else return nil end
-    elseif Device:isAndroid() then
-        return ANDROID_SYSTEM_FONT_DIR
-    end
-end
-
-local function usesSystemFonts()
-    return G_reader_settings:isTrue("system_fonts")
 end
 
 local function openFontDir()
     if not Device:canOpenLink() then return end
-    local user_dir = getUserDir()
+    local user_dir = getDir(true)
     local openable = util.pathExists(user_dir)
     if not openable and user_dir then
         logger.info("Font path not found, making one in ", user_dir)
@@ -65,19 +38,25 @@ local function openFontDir()
     Device:openLink(user_dir)
 end
 
+local function usesSystemFonts()
+    return G_reader_settings:isTrue("system_fonts")
+end
+
 local FontSettings = {}
 
 function FontSettings:getPath()
+    local user, system = getDir(true), getDir()
     if usesSystemFonts() then
-        local system_path = getSystemDir()
-        if system_path ~= nil then
-            return getUserDir()..";"..system_path
+        if user and system then
+            return user .. ";" .. system
+        elseif system then
+            return system
         end
     end
-    return getUserDir()
+    return user
 end
 
-function FontSettings:getMenuTable()
+function FontSettings:getSystemFontMenuItems()
     local t = {{
         text = _("Enable system fonts"),
         checked_func = usesSystemFonts,
@@ -91,18 +70,14 @@ function FontSettings:getMenuTable()
         end,
     }}
 
-    if Device:isDesktop() then table.insert(t, 2, {
+    if Device:isDesktop() or Device:isEmulator() then table.insert(t, 2, {
             text = _("Open fonts folder"),
             keep_menu_open = true,
             callback = openFontDir,
         })
     end
 
-    return {
-        text = _("Font settings"),
-        separator = true,
-        sub_item_table = t
-    }
+    return t
 end
 
 return FontSettings

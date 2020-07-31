@@ -60,6 +60,12 @@ local PocketBook = Generic:new{
     isInBackGround = false,
     hasOTAUpdates = yes,
     hasWifiToggle = yes,
+    isTouchDevice = yes,
+    hasKeys = yes,
+    hasFrontlight = yes,
+    canSuspend = no,
+    emu_events_dev = "/dev/shm/emu_events",
+    home_dir = "/mnt/ext1",
 }
 
 -- Make sure the C BB cannot be used on devices with a 24bpp fb
@@ -94,6 +100,11 @@ function PocketBook:init()
             [KEY_MENU] = "Menu",
             [KEY_PREV] = "LPgBack",
             [KEY_NEXT] = "LPgFwd",
+            [KEY_UP] = "Up",
+            [KEY_DOWN] = "Down",
+            [KEY_LEFT] = "Left",
+            [KEY_RIGHT] = "Right",
+            [KEY_OK] = "Press",
         },
         handleMiscEv = function(this, ev)
             if ev.code == EVT_BACKGROUND then
@@ -137,8 +148,8 @@ function PocketBook:init()
 
     -- fix rotation for Color Lux device
     if PocketBook:getDeviceModel() == "PocketBook Color Lux" then
-        self.screen.blitbuffer_rotation_mode = 0
-        self.screen.native_rotation_mode = 0
+        self.screen.blitbuffer_rotation_mode = self.screen.ORIENTATION_PORTRAIT
+        self.screen.native_rotation_mode = self.screen.ORIENTATION_PORTRAIT
     end
 
     os.remove(self.emu_events_dev)
@@ -198,165 +209,157 @@ end
 -- PocketBook InkPad
 local PocketBook840 = PocketBook:new{
     model = "PBInkPad",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 250,
-    emu_events_dev = "/var/dev/shm/emu_events",
+}
+
+-- PocketBook 515
+local PocketBook515 = PocketBook:new{
+    model = "PB515",
+    display_dpi = 200,
+    isTouchDevice = no,
+    hasWifiToggle = no,
+    hasDPad = yes,
+    hasFewKeys = yes,
+}
+
+-- PocketBoot 613 Basic
+local PocketBook613 = PocketBook:new{
+    model = "PB613B",
+    display_dpi = 167,
+    isTouchDevice = no,
+    hasWifiToggle = no,
+    hasDPad = yes,
+    hasFewKeys = yes,
+}
+
+-- PocketBook 614W Basic
+local PocketBook614W = PocketBook:new{
+    model = "PB614W",
+    display_dpi = 167,
+    isTouchDevice = no,
+    hasWifiToggle = no,
+    hasFrontlight = no,
+    hasDPad = yes,
+    hasFewKeys = yes,
+}
+
+-- PocketBook Basic Lux 2
+local PocketBook616 = PocketBook:new{
+    model = "PBBLux2",
+    display_dpi = 212,
+    isTouchDevice = no,
+    hasWifiToggle = no,
+    hasDPad = yes,
+    hasFewKeys = yes,
 }
 
 -- PocketBook Lux 4
 local PocketBook627 = PocketBook:new{
     model = "PBLux4",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 212,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Touch HD
 local PocketBook631 = PocketBook:new{
     model = "PBTouchHD",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 300,
-    emu_events_dev = "/dev/shm/emu_events",
 }
 
 -- PocketBook Touch HD Plus
 local PocketBook632 = PocketBook:new{
     model = "PBTouchHDPlus",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 300,
     isAlwaysPortrait = yes,
-    emu_events_dev = "/dev/shm/emu_events",
 }
 
 -- PocketBook Lux 3
 local PocketBook626 = PocketBook:new{
     model = "PBLux3",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 212,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Basic Touch
 local PocketBook624 = PocketBook:new{
     model = "PBBasicTouch",
-    isTouchDevice = yes,
-    hasKeys = yes,
     hasFrontlight = no,
     display_dpi = 166,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Basic Touch 2
 local PocketBook625 = PocketBook:new{
     model = "PBBasicTouch2",
-    isTouchDevice = yes,
-    hasKeys = yes,
     hasFrontlight = no,
     display_dpi = 166,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Touch
 local PocketBook622 = PocketBook:new{
     model = "PBTouch",
-    isTouchDevice = yes,
-    hasKeys = yes,
     hasFrontlight = no,
     display_dpi = 166,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Touch Lux
 local PocketBook623 = PocketBook:new{
     model = "PBTouchLux",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 212,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook InkPad 3
 local PocketBook740 = PocketBook:new{
     model = "PBInkPad3",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     isAlwaysPortrait = yes,
     display_dpi = 300,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook InkPad 3 Pro
 local PocketBook740_2 = PocketBook:new{
     model = "PBInkPad3Pro",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     isAlwaysPortrait = yes,
     display_dpi = 300,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook InkPad X
 local PocketBook1040 = PocketBook:new{
     model = "PB1040",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     isAlwaysPortrait = yes,
     display_dpi = 227,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Sense
 local PocketBook630 = PocketBook:new{
     model = "PBSense",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 212,
-    emu_events_dev = "/dev/shm/emu_events",
 }
 
 -- PocketBook Aqua 2
 local PocketBook641 = PocketBook:new{
     model = "PBAqua2",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     display_dpi = 212,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 -- PocketBook Color Lux
 local PocketBookColorLux = PocketBook:new{
     model = "PBColorLux",
-    isTouchDevice = yes,
-    hasKeys = yes,
-    hasFrontlight = yes,
     hasColorScreen = yes,
     has3BytesWideFrameBuffer = yes,
     canUseCBB = no, -- 24bpp
-    isAlwaysPortrait = no,
-    emu_events_dev = "/var/dev/shm/emu_events",
 }
 
 logger.info('SoftwareVersion: ', PocketBook:getSoftwareVersion())
 
 local codename = PocketBook:getDeviceModel()
 
-if codename == "PocketBook 622" then
+if codename == "PocketBook 515" then
+    return PocketBook515
+elseif codename == "PocketBook 613" then
+    return PocketBook613
+elseif codename == "PocketBook 614W" then
+    return PocketBook614W
+elseif codename == "PB616W" or
+    codename == "PocketBook 616" then
+    return PocketBook616
+elseif codename == "PocketBook 622" then
     return PocketBook622
 elseif codename == "PocketBook 623" then
     return PocketBook623

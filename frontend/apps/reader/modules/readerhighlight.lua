@@ -10,6 +10,7 @@ local TimeVal = require("ui/timeval")
 local Translator = require("ui/translator")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
+local util = require("util")
 local _ = require("gettext")
 local C_ = _.pgettext
 local T = require("ffi/util").template
@@ -199,6 +200,18 @@ local function inside_box(pos, box)
     end
 end
 
+local function cleanupSelectedText(text)
+    -- Trim spaces and new lines at start and end
+    text = text:gsub("^[\n%s]*", "")
+    text = text:gsub("[\n%s]*$", "")
+    -- Trim spaces around newlines
+    text = text:gsub("%s*\n%s*", "\n")
+    -- Trim consecutive spaces (that would probably have collapsed
+    -- in rendered CreDocuments)
+    text = text:gsub("%s%s+", " ")
+    return text
+end
+
 function ReaderHighlight:onTapPageSavedHighlight(ges)
     local pages = self.view:getCurrentPageList()
     local pos = self.view:screenToPageTransform(ges.pos)
@@ -322,13 +335,35 @@ function ReaderHighlight:updateHighlight(page, index, side, direction, move_by_c
     local new_beginning = self.view.highlight.saved[page][index].pos0
     local new_end = self.view.highlight.saved[page][index].pos1
     local new_text = self.ui.document:getTextFromXPointers(new_beginning, new_end)
-    self.view.highlight.saved[page][index].text = new_text
+    local new_chapter = self.ui.toc:getTocTitleByPage(new_beginning)
+    self.view.highlight.saved[page][index].text = cleanupSelectedText(new_text)
+    self.view.highlight.saved[page][index].chapter = new_chapter
     local new_highlight = self.view.highlight.saved[page][index]
     self.ui.bookmark:updateBookmark({
         page = highlight_beginning,
         datetime = highlight_time,
         updated_highlight = new_highlight
     }, true)
+    if side == 0 then
+        -- Ensure we show the page with the new beginning of highlight
+        if not self.ui.document:isXPointerInCurrentPage(new_beginning) then
+            self.ui:handleEvent(Event:new("GotoXPointer", new_beginning))
+        end
+    else
+        -- Ensure we show the page with the new end of highlight
+        if not self.ui.document:isXPointerInCurrentPage(new_end) then
+            if self.view.view_mode == "page" then
+                self.ui:handleEvent(Event:new("GotoXPointer", new_end))
+            else
+                -- Not easy to get the y that would show the whole line
+                -- containing new_end. So, we scroll so that new_end
+                -- is at 2/3 of the screen.
+                local end_y = self.ui.document:getPosFromXPointer(new_end)
+                local top_y = end_y - math.floor(Screen:getHeight() * 2/3)
+                self.ui.rolling:_gotoPos(top_y)
+            end
+        end
+    end
     UIManager:setDirty(self.dialog, "ui")
 end
 
@@ -445,7 +480,7 @@ function ReaderHighlight:onShowHighlightMenu()
                 text = C_("Text", "Copy"),
                 enabled = Device:hasClipboard(),
                 callback = function()
-                    Device.input.setClipboardText(self.selected_text.text)
+                    Device.input.setClipboardText(cleanupSelectedText(self.selected_text.text))
                 end,
             },
             {
@@ -514,7 +549,7 @@ function ReaderHighlight:onShowHighlightMenu()
             {
                 text = _("Share text"),
                 callback = function()
-                    local text = self.selected_text.text
+                    local text = cleanupSelectedText(self.selected_text.text)
                     -- call self:onClose() before calling the android framework
                     self:onClose()
                     Device.doShareText(text)
@@ -528,6 +563,14 @@ function ReaderHighlight:onShowHighlightMenu()
         tap_close_callback = function() self:handleEvent(Event:new("Tap")) end,
     }
     UIManager:show(self.highlight_dialog)
+end
+
+function ReaderHighlight:_resetHoldTimer(clear)
+    if clear then
+        self.hold_last_tv = nil
+    else
+        self.hold_last_tv = TimeVal.now()
+    end
 end
 
 function ReaderHighlight:onHold(arg, ges)
@@ -580,7 +623,7 @@ function ReaderHighlight:onHold(arg, ges)
         --- @todo only mark word?
         -- Unfortunately, CREngine does not return good coordinates
         -- UIManager:setDirty(self.dialog, "partial", self.selected_word.sbox)
-        self.hold_start_tv = TimeVal.now()
+        self:_resetHoldTimer()
         if word.pos0 then
             -- Remember original highlight start position, so we can show
             -- a marker when back from across-pages text selection, which
@@ -595,11 +638,13 @@ end
 function ReaderHighlight:onHoldPan(_, ges)
     if self.hold_pos == nil then
         logger.dbg("no previous hold position")
+        self:_resetHoldTimer(true)
         return true
     end
     local page_area = self.view:getScreenPageArea(self.hold_pos.page)
     if ges.pos:notIntersectWith(page_area) then
         logger.dbg("not inside page area", ges, page_area)
+        self:_resetHoldTimer()
         return true
     end
 
@@ -633,6 +678,7 @@ function ReaderHighlight:onHoldPan(_, ges)
                                       and self.holdpan_pos.x > 7/8*Screen:getWidth()
         end
         if is_in_prev_page_corner or is_in_next_page_corner then
+            self:_resetHoldTimer()
             if self.was_in_some_corner then
                 -- Do nothing, wait for the user to move his finger out of that corner
                 return true
@@ -675,7 +721,7 @@ function ReaderHighlight:onHoldPan(_, ges)
                 -- Also, we are not able to move hold_pos.x out of screen,
                 -- so if we started on the right page, ignore top left corner,
                 -- and if we started on the left page, ignore bottom right corner.
-                local screen_half_width = math.floor(Screen:getWidth() * 1/2)
+                local screen_half_width = math.floor(Screen:getWidth() * 0.5)
                 if self.hold_pos.x >= screen_half_width and is_in_prev_page_corner then
                     return true
                 elseif self.hold_pos.x <= screen_half_width and is_in_next_page_corner then
@@ -722,6 +768,7 @@ function ReaderHighlight:onHoldPan(_, ges)
         -- no modification
         return
     end
+    self:_resetHoldTimer() -- selection updated
     logger.dbg("selected text:", self.selected_text)
     if self.selected_text then
         self.view.highlight.temp[self.hold_pos.page] = self.selected_text.sboxes
@@ -741,7 +788,7 @@ No OCR results or no language data.
 
 KOReader has a build-in OCR engine for recognizing words in scanned PDF and DjVu documents. In order to use OCR in scanned pages, you need to install tesseract trained data for your document language.
 
-You can download language data files for version 3.04 from https://github.com/tesseract-ocr/tesseract/wiki/Data-Files
+You can download language data files for version 3.04 from https://tesseract-ocr.github.io/tessdoc/Data-Files
 
 Copy the language data files for Tesseract 3.04 (e.g., eng.traineddata for English and spa.traineddata for Spanish) into koreader/data/tessdata]])
 
@@ -765,30 +812,6 @@ function ReaderHighlight:lookup(selected_word, selected_link)
     end
 end
 
-local function prettifyCss(css_text)
-    -- This is not perfect, but enough to make some ugly CSS readable.
-    -- Get rid of \t so we can use it as a replacement/hiding char
-    css_text = css_text:gsub("\t", " ")
-    -- Wrap and indent declarations
-    css_text = css_text:gsub("%s*{%s*", " {\n    ")
-    css_text = css_text:gsub(";%s*}%s*", ";\n}\n")
-    css_text = css_text:gsub(";%s*([^}])", ";\n    %1")
-    css_text = css_text:gsub("%s*}%s*", "\n}\n")
-    -- Cleanup declarations
-    css_text = css_text:gsub("{[^}]*}", function(s)
-        s = s:gsub("%s*:%s*", ": ")
-        -- Temporarily hide/replace ',' in declaration so they
-        -- are not matched and made multi-lines by followup gsub
-        s = s:gsub("%s*,%s*", "\t")
-        return s
-    end)
-    -- Have each selector (separated by ',') on a new line
-    css_text = css_text:gsub("%s*,%s*", " ,\n")
-    -- Restore hidden ',' in declarations
-    css_text = css_text:gsub("\t", ", ")
-    return css_text
-end
-
 function ReaderHighlight:viewSelectionHTML(debug_view)
     if self.ui.document.info.has_pages then
         return
@@ -796,21 +819,21 @@ function ReaderHighlight:viewSelectionHTML(debug_view)
     if self.selected_text and self.selected_text.pos0 and self.selected_text.pos1 then
         -- For available flags, see the "#define WRITENODEEX_*" in crengine/src/lvtinydom.cpp
         -- Start with valid and classic displayed HTML (with only block nodes indented),
-        -- including styles found in <HEAD>, and linked CSS files content.
-        local html_flags = 0x6030
+        -- including styles found in <HEAD>, linked CSS files content, and misc info.
+        local html_flags = 0x6830
         if not debug_view then
             debug_view = 0
         end
         if debug_view == 1 then
             -- Each node on a line, with markers and numbers of skipped chars and siblings shown,
             -- with possibly invalid HTML (text nodes not escaped)
-            html_flags = 0x635A
+            html_flags = 0x6B5A
         elseif debug_view == 2 then
             -- Additionally see rendering methods of each node
-            html_flags = 0x675A
+            html_flags = 0x6F5A
         elseif debug_view == 3 then
             -- Or additionally see unicode codepoint of each char
-            html_flags = 0x635E
+            html_flags = 0x6B5E
         end
         local html, css_files = self.ui.document:getHTMLFromXPointers(self.selected_text.pos0,
                                     self.selected_text.pos1, html_flags, true)
@@ -826,7 +849,7 @@ function ReaderHighlight:viewSelectionHTML(debug_view)
                 -- the height of this section, we don't want to have to scroll
                 -- many pages to get to the HTML content on the initial view.)
                 html = html:gsub("(<stylesheet[^>]*>)%s*(.-)%s*(</stylesheet>)", function(pre, css_text, post)
-                    return pre .. "\n" .. prettifyCss(css_text) .. post
+                    return pre .. "\n" .. util.prettifyCSS(css_text) .. post
                 end)
             end
             local TextViewer = require("ui/widget/textviewer")
@@ -855,7 +878,7 @@ function ReaderHighlight:viewSelectionHTML(debug_view)
                                             UIManager:close(cssviewer)
                                             UIManager:show(TextViewer:new{
                                                 title = css_files[i],
-                                                text = prettifyCss(css_text),
+                                                text = util.prettifyCSS(css_text),
                                                 text_face = Font:getFace("smallinfont"),
                                                 justified = false,
                                                 para_direction_rtl = false,
@@ -943,21 +966,28 @@ function ReaderHighlight:onTranslateText(text)
 end
 
 function ReaderHighlight:onHoldRelease()
-    if self.hold_start_tv then
-        local hold_duration = TimeVal.now() - self.hold_start_tv
+    local long_final_hold = false
+    if self.hold_last_tv then
+        local hold_duration = TimeVal.now() - self.hold_last_tv
         hold_duration = hold_duration.sec + hold_duration.usec/1000000
-        self.hold_start_tv = nil
-        if hold_duration > 3.0 and self.selected_word then
-            -- if we were holding for more than 3 seconds on a word, make
-            -- it behave like we panned and selected more words, so we can
-            -- directly access the highlight menu and avoid a dict lookup
+        if hold_duration > 3.0 then
+            -- We stayed 3 seconds before release without updating selection
+            long_final_hold = true
+        end
+        self.hold_last_tv = nil
+    end
+    if self.selected_word then -- single-word selection
+        if long_final_hold or G_reader_settings:isTrue("highlight_action_on_single_word") then
+            -- Force a 0-distance pan to have a self.selected_text with this word,
+            -- which will enable the highlight menu or action instead of dict lookup
             self:onHoldPan(nil, {pos=self.hold_ges_pos})
         end
     end
 
     if self.selected_text then
         local default_highlight_action = G_reader_settings:readSetting("default_highlight_action")
-        if not default_highlight_action then
+        if long_final_hold or not default_highlight_action then
+            -- bypass default action and show popup if long final hold
             self:onShowHighlightMenu()
         elseif default_highlight_action == "highlight" then
             self:saveHighlight()
@@ -968,6 +998,13 @@ function ReaderHighlight:onHoldRelease()
         elseif default_highlight_action == "wikipedia" then
             self:lookupWikipedia()
             self:onClose()
+        elseif default_highlight_action == "dictionary" then
+            self:onHighlightDictLookup()
+            self:onClose()
+        elseif default_highlight_action == "search" then
+            self:onHighlightSearch()
+            -- No self:onClose() to not remove the selected text
+            -- which will have been the first search result
         end
     elseif self.selected_word then
         self:lookup(self.selected_word, self.selected_link)
@@ -980,7 +1017,9 @@ function ReaderHighlight:onCycleHighlightAction()
     local next_actions = {
         highlight = "translate",
         translate = "wikipedia",
-        wikipedia = nil
+        wikipedia = "dictionary",
+        dictionary = "search",
+        search = nil,
     }
     local current_action = G_reader_settings:readSetting("default_highlight_action")
     if not current_action then
@@ -1041,7 +1080,7 @@ function ReaderHighlight:onUnhighlight(bookmark_item)
         datetime = bookmark_item.datetime
     else -- called from DictQuickLookup Unhighlight button
         page = self.hold_pos.page
-        sel_text = self.selected_text.text
+        sel_text = cleanupSelectedText(self.selected_text.text)
         sel_pos0 = self.selected_text.pos0
     end
     if self.ui.document.info.has_pages then -- We can safely use page
@@ -1098,13 +1137,15 @@ function ReaderHighlight:getHighlightBookmarkItem()
         local datetime = os.date("%Y-%m-%d %H:%M:%S")
         local page = self.ui.document.info.has_pages and
                 self.hold_pos.page or self.selected_text.pos0
+        local chapter_name = self.ui.toc:getTocTitleByPage(page)
         return {
             page = page,
             pos0 = self.selected_text.pos0,
             pos1 = self.selected_text.pos1,
             datetime = datetime,
-            notes = self.selected_text.text,
+            notes = cleanupSelectedText(self.selected_text.text),
             highlighted = true,
+            chapter = chapter_name,
         }
     end
 end
@@ -1119,13 +1160,17 @@ function ReaderHighlight:saveHighlight()
             self.view.highlight.saved[page] = {}
         end
         local datetime = os.date("%Y-%m-%d %H:%M:%S")
+        local pg_or_xp = self.ui.document.info.has_pages and
+                self.hold_pos.page or self.selected_text.pos0
+        local chapter_name = self.ui.toc:getTocTitleByPage(pg_or_xp)
         local hl_item = {
             datetime = datetime,
-            text = self.selected_text.text,
+            text = cleanupSelectedText(self.selected_text.text),
             pos0 = self.selected_text.pos0,
             pos1 = self.selected_text.pos1,
             pboxes = self.selected_text.pboxes,
             drawer = self.view.highlight.saved_drawer,
+            chapter = chapter_name
         }
         table.insert(self.view.highlight.saved[page], hl_item)
         local bookmark_item = self:getHighlightBookmarkItem()
@@ -1192,7 +1237,7 @@ end
 
 function ReaderHighlight:lookupWikipedia()
     if self.selected_text then
-        self.ui:handleEvent(Event:new("LookupWikipedia", self.selected_text.text))
+        self.ui:handleEvent(Event:new("LookupWikipedia", cleanupSelectedText(self.selected_text.text)))
     end
 end
 
@@ -1200,7 +1245,7 @@ function ReaderHighlight:onHighlightSearch()
     logger.dbg("search highlight")
     self:highlightFromHoldPos()
     if self.selected_text then
-        local text = require("util").stripPunctuation(self.selected_text.text)
+        local text = util.stripPunctuation(cleanupSelectedText(self.selected_text.text))
         self.ui:handleEvent(Event:new("ShowSearchDialog", text))
     end
 end
@@ -1209,7 +1254,7 @@ function ReaderHighlight:onHighlightDictLookup()
     logger.dbg("dictionary lookup highlight")
     self:highlightFromHoldPos()
     if self.selected_text then
-        self.ui:handleEvent(Event:new("LookupWord", self.selected_text.text))
+        self.ui:handleEvent(Event:new("LookupWord", cleanupSelectedText(self.selected_text.text)))
     end
 end
 

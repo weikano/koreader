@@ -37,12 +37,12 @@ function SkimToWidget:init()
     self.screen_width = Screen:getWidth()
     self.screen_height = Screen:getHeight()
     self.span = math.ceil(self.screen_height * 0.01)
-    self.width = self.screen_width * 0.95
+    self.width = math.floor(self.screen_width * 0.95)
     self.button_bordersize = Size.border.button
     -- the buttons need some kind of separation but maybe I should just implement
     -- margin_left and margin_right…
     self.button_margin = self.button_bordersize
-    self.button_width = self.screen_width * 0.16 - (2*self.button_margin)
+    self.button_width = math.floor(self.screen_width * 0.16) - (2*self.button_margin)
     if Device:hasKeys() then
         self.key_events = {
             Close = { {"Back"}, doc = "close skimto page" }
@@ -66,6 +66,11 @@ function SkimToWidget:init()
     self.curr_page = self.ui:getCurrentPage()
     self.page_count = self.document:getPageCount()
 
+    local curr_page_display = tostring(self.curr_page)
+    if self.ui.pagemap and self.ui.pagemap:wantsPageLabels() then
+        curr_page_display = self.ui.pagemap:getCurrentPageLabel(true)
+    end
+
     local ticks_candidates = {}
     if self.ui.toc then
         local max_level = self.ui.toc:getMaxDepth()
@@ -88,12 +93,12 @@ function SkimToWidget:init()
             text = dialog_title,
             face = self.title_face,
             bold = true,
-            max_width = self.screen_width * 0.95,
+            max_width = math.floor(self.screen_width * 0.95),
         },
     }
 
     self.progress_bar = ProgressWidget:new{
-        width = self.screen_width * 0.9,
+        width = math.floor(self.screen_width * 0.9),
         height = Size.item.height_big,
         percentage = self.curr_page / self.page_count,
         ticks = self.ticks_candidates,
@@ -170,13 +175,13 @@ function SkimToWidget:init()
         end,
     }
     self.current_page_text = Button:new{
-        text = tostring(self.curr_page),
+        text = curr_page_display,
         bordersize = 0,
         margin = self.button_margin,
         radius = 0,
         padding = 0,
         enabled = true,
-        width = self.screen_width * 0.2 - (2*self.button_margin),
+        width = math.floor(self.screen_width * 0.2) - (2*self.button_margin),
         show_parent = self,
         callback = function()
             self.callback_switch_to_goto()
@@ -238,7 +243,7 @@ function SkimToWidget:init()
         width = self.button_width,
         show_parent = self,
         callback = function()
-            self.ui:handleEvent(Event:new("GotoNextBookmarkFromPage"))
+            self:goToByEvent("GotoNextBookmarkFromPage")
         end,
         hold_callback = function()
             local page = self.ui.bookmark:getLastBookmarkedPageFromPage(self.ui:getCurrentPage())
@@ -255,7 +260,7 @@ function SkimToWidget:init()
         width = self.button_width,
         show_parent = self,
         callback = function()
-            self.ui:handleEvent(Event:new("GotoPreviousBookmarkFromPage"))
+            self:goToByEvent("GotoPreviousBookmarkFromPage")
         end,
         hold_callback = function()
             local page = self.ui.bookmark:getFirstBookmarkedPageFromPage(self.ui:getCurrentPage())
@@ -263,7 +268,7 @@ function SkimToWidget:init()
         end,
     }
 
-    local horizontal_span_up = HorizontalSpan:new{ width = self.screen_width * 0.2 }
+    local horizontal_span_up = HorizontalSpan:new{ width = math.floor(self.screen_width * 0.2) }
        local button_table_up = HorizontalGroup:new{
         align = "center",
         button_chapter_prev,
@@ -336,7 +341,11 @@ function SkimToWidget:update()
         self.curr_page = self.page_count
     end
     self.progress_bar.percentage = self.curr_page / self.page_count
-    self.current_page_text:setText(tostring(self.curr_page), self.current_page_text.width)
+    local curr_page_display = tostring(self.curr_page)
+    if self.ui.pagemap and self.ui.pagemap:wantsPageLabels() then
+        curr_page_display = self.ui.pagemap:getCurrentPageLabel(true)
+    end
+    self.current_page_text:setText(curr_page_display, self.current_page_text.width)
 end
 
 function SkimToWidget:addOriginToLocationStack(add_current)
@@ -395,6 +404,16 @@ function SkimToWidget:goToBookmark(page)
     if page then
         self:addOriginToLocationStack()
         self.ui.bookmark:gotoBookmark(page)
+        self.curr_page = self.ui:getCurrentPage()
+        self:update()
+    end
+end
+
+function SkimToWidget:goToByEvent(event_name)
+    if event_name then
+        self:addOriginToLocationStack()
+        self.ui:handleEvent(Event:new(event_name, false))
+            -- add_current_location_to_stack=false, as we handled it here
         self.curr_page = self.ui:getCurrentPage()
         self:update()
     end

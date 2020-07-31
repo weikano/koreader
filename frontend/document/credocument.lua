@@ -28,7 +28,32 @@ local CreDocument = Document:new{
     line_space_percent = 100,
     default_font = "Noto Serif",
     header_font = "Noto Sans",
-    fallback_font = "Noto Sans CJK SC",
+
+    -- Reasons for the fallback font ordering:
+    -- - Noto Sans CJK SC before FreeSans/Serif, as it has nice and larger
+    --   symbol glyphs for Wikipedia EPUB headings than both Free fonts)
+    -- - FreeSerif after most, has it has good coverage but smaller glyphs
+    --   (and most other fonts are better looking)
+    -- - FreeSans covers areas that FreeSerif do not, and is usually
+    --   fine along other fonts (even serif fonts)
+    -- - Noto Serif & Sans at the end, just in case, and to have consistent
+    --   (and larger than FreeSerif) '?' glyphs for codepoints not found
+    --   in any fallback font. Also, we don't know if the user is using
+    --   a serif or a sans main font, so choosing to have one of these early
+    --   might not be the best decision (and moving them before FreeSans would
+    --   require one to set FreeSans as fallback to get its nicer glyphes, which
+    --   would override Noto Sans CJK good symbol glyphs with smaller ones
+    --   (Noto Sans & Serif do not have these symbol glyphs).
+    fallback_fonts = {
+        "Noto Sans CJK SC",
+        "Noto Naskh Arabic",
+        "Noto Sans Devanagari UI",
+        "FreeSans",
+        "FreeSerif",
+        "Noto Serif",
+        "Noto Sans",
+    },
+
     default_css = "./data/cr3.css",
     provider = "crengine",
     provider_name = "Cool Reader Engine",
@@ -165,13 +190,12 @@ function CreDocument:setupDefaultView()
     self._document:readDefaults()
     logger.dbg("CreDocument: applied cr3.ini default settings.")
 
-    -- set fallback font face (this was formerly done in :init(), but it
+    -- set fallback font faces (this was formerly done in :init(), but it
     -- affects crengine calcGlobalSettingsHash() and would invalidate the
     -- cache from the main currently being read document when we just
-    -- loadDocument(only_metadata) another document go get its metadata
+    -- loadDocument(only_metadata) another document to get its metadata
     -- or cover image, eg. from History hold menu).
-    self._document:setStringProperty("crengine.font.fallback.face",
-        G_reader_settings:readSetting("fallback_font") or self.fallback_font)
+    self:setupFallbackFontFaces()
 
     -- adjust font sizes according to dpi set in canvas context
     self._document:adjustFontSizes(CanvasContext:getDPI())
@@ -180,6 +204,14 @@ function CreDocument:setupDefaultView()
     if G_reader_settings:readSetting("cre_header_status_font_size") then
         self._document:setIntProperty("crengine.page.header.font.size",
             G_reader_settings:readSetting("cre_header_status_font_size"))
+    end
+
+    -- One can set these to change from white background
+    if G_reader_settings:readSetting("cre_background_color") then
+        self:setBackgroundColor(G_reader_settings:readSetting("cre_background_color"))
+    end
+    if G_reader_settings:readSetting("cre_background_image") then
+        self:setBackgroundImage(G_reader_settings:readSetting("cre_background_image"))
     end
 end
 
@@ -601,22 +633,69 @@ function CreDocument:setFontFace(new_font_face)
     end
 end
 
-function CreDocument:setFallbackFontFace(new_fallback_font_face)
-    if new_fallback_font_face then
-        logger.dbg("CreDocument: set fallback font face", new_fallback_font_face)
-        self._document:setStringProperty("crengine.font.fallback.face", new_fallback_font_face)
-        -- crengine may not accept our fallback font, we need to check
-        local set_fallback_font_face = self._document:getStringProperty("crengine.font.fallback.face")
-        logger.dbg("CreDocument: crengine fallback font face", set_fallback_font_face)
-        if set_fallback_font_face ~= new_fallback_font_face then
-            logger.info("CreDocument:", new_fallback_font_face, "is not usable as a fallback font")
-            return false
+function CreDocument:setupFallbackFontFaces()
+    local fallbacks = {}
+    local seen_fonts = {}
+    local user_fallback = G_reader_settings:readSetting("fallback_font")
+    if user_fallback then
+        table.insert(fallbacks, user_fallback)
+        seen_fonts[user_fallback] = true
+    end
+    for _, font_name in pairs(self.fallback_fonts) do
+        if not seen_fonts[font_name] then
+            table.insert(fallbacks, font_name)
+            seen_fonts[font_name] = true
         end
-        self.fallback_font = new_fallback_font_face
-        return true
+    end
+    if G_reader_settings:isFalse("additional_fallback_fonts") then
+        -- Keep the first fallback font (user set or first from self.fallback_fonts),
+        -- as crengine won't reset its current set when provided with an empty string
+        for i=#fallbacks, 2, -1 do
+            table.remove(fallbacks, i)
+        end
+    end
+    -- We use '|' as the delimiter (which is less likely to be found in font
+    -- names than ',' or ';', without the need to have to use quotes.
+    local s_fallbacks = table.concat(fallbacks, "|")
+    logger.dbg("CreDocument: set fallback font faces:", s_fallbacks)
+    self._document:setStringProperty("crengine.font.fallback.face", s_fallbacks)
+end
+
+-- To use the new crengine language typography facilities (hyphenation, line breaking,
+-- OpenType fonts locl letter forms...)
+function CreDocument:setTextMainLang(lang)
+    if lang then
+        logger.dbg("CreDocument: set textlang main lang", lang)
+        self._document:setStringProperty("crengine.textlang.main.lang", lang)
     end
 end
 
+function CreDocument:setTextEmbeddedLangs(toggle)
+    logger.dbg("CreDocument: set textlang embedded langs", toggle)
+    self._document:setStringProperty("crengine.textlang.embedded.langs.enabled", toggle and 1 or 0)
+end
+
+function CreDocument:setTextHyphenation(toggle)
+    logger.dbg("CreDocument: set textlang hyphenation enabled", toggle)
+    self._document:setStringProperty("crengine.textlang.hyphenation.enabled", toggle and 1 or 0)
+end
+
+function CreDocument:setTextHyphenationSoftHyphensOnly(toggle)
+    logger.dbg("CreDocument: set textlang hyphenation soft hyphens only", toggle)
+    self._document:setStringProperty("crengine.textlang.hyphenation.soft.hyphens.only", toggle and 1 or 0)
+end
+
+function CreDocument:setTextHyphenationForceAlgorithmic(toggle)
+    logger.dbg("CreDocument: set textlang hyphenation force algorithmic", toggle)
+    self._document:setStringProperty("crengine.textlang.hyphenation.force.algorithmic", toggle and 1 or 0)
+end
+
+function CreDocument:getTextMainLangDefaultHyphDictionary()
+    local main_lang_tag, main_lang_active_hyph_dict, loaded_lang_infos = cre.getTextLangStatus() -- luacheck: no unused
+    return loaded_lang_infos[main_lang_tag] and loaded_lang_infos[main_lang_tag].hyph_dict_name
+end
+
+-- To use the old crengine hyphenation manager (only one global hyphenation method)
 function CreDocument:setHyphDictionary(new_hyph_dictionary)
     if new_hyph_dictionary then
         logger.dbg("CreDocument: set hyphenation dictionary", new_hyph_dictionary)
@@ -688,6 +767,10 @@ function CreDocument:setViewDimen(dimen)
     self._document:setViewDimen(dimen.w, dimen.h)
 end
 
+function CreDocument:setHeaderProgressMarks(pages, ticks)
+    self._document:setHeaderProgressMarks(pages, ticks)
+end
+
 function CreDocument:setHeaderFont(new_font)
     if new_font then
         logger.dbg("CreDocument: set header font", new_font)
@@ -739,6 +822,11 @@ function CreDocument:setWordSpacing(values)
     self._document:setIntProperty("crengine.style.space.width.scale.percent", values[1])
     logger.dbg("CreDocument: set space condensing", values[2])
     self._document:setIntProperty("crengine.style.space.condensing.percent", values[2])
+end
+
+function CreDocument:setWordExpansion(value)
+    logger.dbg("CreDocument: set word expansion", value)
+    self._document:setIntProperty("crengine.style.max.added.letter.spacing.percent", value or 0)
 end
 
 function CreDocument:setStyleSheet(new_css_file, appended_css_content )
@@ -817,6 +905,11 @@ function CreDocument:setStatusLineProp(prop)
     self._document:setStringProperty("window.status.line", prop)
 end
 
+function CreDocument:setBackgroundColor(bgcolor) -- use nil to set to white
+    logger.dbg("CreDocument: set background color", bgcolor)
+    self._document:setBackgroundColor(bgcolor)
+end
+
 function CreDocument:setBackgroundImage(img_path) -- use nil to unset
     logger.dbg("CreDocument: set background image", img_path)
     self._document:setBackgroundImage(img_path)
@@ -865,6 +958,10 @@ function CreDocument:getStatistics()
     return self._document:getStatistics()
 end
 
+function CreDocument:getUnknownEntities()
+    return self._document:getUnknownEntities()
+end
+
 function CreDocument:canHaveAlternativeToc()
     return true
 end
@@ -877,12 +974,45 @@ function CreDocument:buildAlternativeToc()
     self._document:buildAlternativeToc()
 end
 
+function CreDocument:hasPageMap()
+    return self._document:hasPageMap()
+end
+
+function CreDocument:getPageMap()
+    return self._document:getPageMap()
+end
+
+function CreDocument:getPageMapSource()
+    return self._document:getPageMapSource()
+end
+
+function CreDocument:getPageMapCurrentPageLabel()
+    return self._document:getPageMapCurrentPageLabel()
+end
+
+function CreDocument:getPageMapFirstPageLabel()
+    return self._document:getPageMapFirstPageLabel()
+end
+
+function CreDocument:getPageMapLastPageLabel()
+    return self._document:getPageMapLastPageLabel()
+end
+
+function CreDocument:getPageMapXPointerPageLabel(xp)
+    return self._document:getPageMapXPointerPageLabel(xp)
+end
+
+function CreDocument:getPageMapVisiblePageLabels()
+    return self._document:getPageMapVisiblePageLabels()
+end
+
 function CreDocument:register(registry)
     registry:addProvider("azw", "application/vnd.amazon.mobi8-ebook", self, 90)
     registry:addProvider("chm", "application/vnd.ms-htmlhelp", self, 90)
     registry:addProvider("doc", "application/msword", self, 90)
     registry:addProvider("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", self, 90)
     registry:addProvider("epub", "application/epub+zip", self, 100)
+    registry:addProvider("epub3", "application/epub+zip", self, 100)
     registry:addProvider("fb2", "application/fb2", self, 90)
     registry:addProvider("fb2.zip", "application/zip", self, 90)
     registry:addProvider("fb3", "application/fb3", self, 90)
@@ -905,7 +1035,7 @@ function CreDocument:register(registry)
     registry:addProvider("rtf", "application/rtf", self, 90)
     registry:addProvider("xhtml", "application/xhtml+xml", self, 90)
     registry:addProvider("zip", "application/zip", self, 10)
-    -- Scripts that we allow running in the FM (c.f., util.isAllowedScript)
+    -- Scripts that we allow running in the FM (c.f., Device:canExecuteScript)
     registry:addProvider("sh", "application/x-shellscript", self, 90)
     registry:addProvider("py", "text/x-python", self, 90)
 end
@@ -1184,6 +1314,8 @@ function CreDocument:setupCallCache()
             elseif name == "getScreenPositionFromXPointer" then cache_by_tag = true
             elseif name == "getXPointer" then cache_by_tag = true
             elseif name == "isXPointerInCurrentPage" then cache_by_tag = true
+            elseif name == "getPageMapCurrentPageLabel" then cache_by_tag = true
+            elseif name == "getPageMapVisiblePageLabels" then cache_by_tag = true
 
             -- Assume all remaining get* can have their results
             -- cached globally by function arguments

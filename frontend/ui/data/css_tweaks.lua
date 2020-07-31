@@ -281,13 +281,35 @@ DocFragment {
             },
         },
         {
-            id = "hyphenate_all_auto";
-            title = _("Allow hyphenation on all text"),
-            description = _("Allow hyphenation on all text (except headings), in case the publisher has disabled it."),
-            css = [[
+            title = _("Hyphenation, ligatures, ruby"),
+            {
+                id = "hyphenate_all_auto";
+                title = _("Allow hyphenation on all text"),
+                description = _("Allow hyphenation on all text (except headings), in case the publisher has disabled it."),
+                css = [[
 * { hyphens: auto !important; }
 h1, h2, h3, h4, h5, h6 { hyphens: none !important; }
-            ]],
+                ]],
+            },
+            {
+                id = "ligature_all_no_common_ligature";
+                title = _("Disable common ligatures"),
+                description = _("Disable common ligatures, which are enabled by default in 'best' kerning mode."),
+                -- We don't use !important, as this would stop other font-variant properties
+                -- from being applied
+                css = [[
+* { font-variant: no-common-ligatures; }
+                ]],
+                separator = true,
+            },
+            {
+                id = "ruby_inline";
+                title = _("Render <ruby> content inline"),
+                description = _("Disable handling of <ruby> tags and render them inline."),
+                css = [[
+ruby { display: inline !important; }
+                ]],
+            },
             separator = true,
         },
         {
@@ -316,8 +338,8 @@ h1, h2, h3, h4, h5, h6 { hyphens: none !important; }
                 id = "lineheight_all_normal_strut_confined";
                 title = _("Enforce steady line heights"),
                 description = _("Prevent inline content like sub- and superscript from changing their paragraph line height."),
-                priority = -5, -- so other -cr-hint can override (this one has effect only on inline content)
-                css = [[* { -cr-hint: strut-confined; }]],
+                -- strut-confined is among the few cr-hints that are inherited
+                css = [[body { -cr-hint: strut-confined; }]],
                 separator = true,
             },
             {
@@ -454,6 +476,7 @@ body, h1, h2, h3, h4, h5, h6, div, li, td, th { text-indent: 0 !important; }
             title = _("Full-width tables"),
             description = _("Make table expand to the full width of the page. (Tables with small content now use only the width needed to display that content. This restores the previous behavior.)"),
             css = [[table { width: 100% !important; }]],
+            priority = 2, -- Override next one
         },
         {
             id = "table_td_width_auto";
@@ -627,14 +650,17 @@ This is just an example, that will need to be adapted into a user style tweak.]]
                     title = _("In-page FB2 footnotes"),
                     description = _([[
 Show FB2 footnote text at the bottom of pages that contain links to them.]]),
-                    -- Avoid 75% of 75% in case of nested <section>
+                    -- Restrict this to FB2 documents, even if we won't probably
+                    -- match in any other kind of document
                     css = [[
 body[name="notes"] section {
-    -cr-hint: footnote-inpage;
-    margin: 0 !important;
+    -cr-only-if: fb2-document;
+        -cr-hint: footnote-inpage;
+        margin: 0 !important;
 }
 body[name="notes"] > section {
-    font-size: 75%;
+    -cr-only-if: fb2-document;
+        font-size: 0.75rem;
 }
                     ]],
                 },
@@ -645,11 +671,13 @@ body[name="notes"] > section {
 Show FB2 endnote text at the bottom of pages that contain links to them.]]),
                     css = [[
 body[name="comments"] section {
-    -cr-hint: footnote-inpage;
-    margin: 0 !important;
+    -cr-only-if: fb2-document;
+        -cr-hint: footnote-inpage;
+        margin: 0 !important;
 }
 body[name="comments"] > section {
-    font-size: 85%;
+    -cr-only-if: fb2-document;
+        font-size: 0.85rem;
 }
                     ]],
                     separator = true,
@@ -663,7 +691,8 @@ FB2 footnotes and endnotes get a smaller font size when displayed in-page. This 
 body[name="notes"] > section,
 body[name="comments"] > section
 {
-    font-size: 100% !important;
+    -cr-only-if: fb2-document;
+        font-size: 1rem !important;
 }
                     ]],
                 },
@@ -675,6 +704,7 @@ body[name="comments"] > section
                 description = _([[
 Show EPUB footnote text at the bottom of pages that contain links to them.
 This only works with footnotes that have specific attributes set by the publisher.]]),
+                -- Restrict this to EPUB documents, as FB2 can have <a type="note">
                 css = [[
 *[type~="note"],
 *[type~="footnote"],
@@ -683,8 +713,9 @@ This only works with footnotes that have specific attributes set by the publishe
 *[role~="doc-footnote"],
 *[role~="doc-rearnote"]
 {
-    -cr-hint: footnote-inpage;
-    margin: 0 !important;
+    -cr-only-if: epub-document;
+        -cr-hint: footnote-inpage;
+        margin: 0 !important;
 }
                 ]],
             },
@@ -694,6 +725,8 @@ This only works with footnotes that have specific attributes set by the publishe
                 description = _([[
 Show EPUB footnote text at the bottom of pages that contain links to them.
 This only works with footnotes that have specific attributes set by the publisher.]]),
+                -- Restrict this to EPUB documents, as FB2 can have <a type="note">
+                -- and we don't want to have them smaller
                 css = [[
 *[type~="note"],
 *[type~="footnote"],
@@ -702,9 +735,10 @@ This only works with footnotes that have specific attributes set by the publishe
 *[role~="doc-footnote"],
 *[role~="doc-rearnote"]
 {
-    -cr-hint: footnote-inpage;
-    margin: 0 !important;
-    font-size: 80% !important;
+    -cr-only-if: epub-document;
+        -cr-hint: footnote-inpage;
+        margin: 0 !important;
+        font-size: 0.8rem !important;
 }
                 ]],
                 separator = true,
@@ -731,7 +765,7 @@ ol.references > li > .mw-cite-backlink { display: none; }
 ol.references > li {
     -cr-hint: footnote-inpage;
     margin: 0 !important;
-    font-size: 80% !important;
+    font-size: 0.8rem !important;
 }
 /* hide backlinks */
 ol.references > li > .noprint { display: none; }
@@ -771,7 +805,7 @@ This tweak can be duplicated as a user style tweak when books contain footnotes 
 {
     -cr-hint: footnote-inpage;
     margin: 0 !important;
-    font-size: 80% !important;
+    font-size: 0.8rem !important;
 }
                 ]],
             },
@@ -788,6 +822,15 @@ This tweak toggles this behavior, and may show the <epub:case> content as plain 
             css = [[
 switch > case    { display: inline; }
 switch > default { display: none; }
+            ]],
+        },
+        {
+            id = "no_pseudo_element_before_after";
+            title = _("Disable before/after pseudo elements"),
+            description = _([[Disable generated text from ::before and ::after pseudo elements, usually used to add cosmetic text around some content.]]),
+            css = [[
+*::before { display: none !important; }
+*::after  { display: none !important; }
             ]],
         },
         {

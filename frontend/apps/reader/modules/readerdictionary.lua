@@ -101,7 +101,8 @@ end
 
 function ReaderDictionary:init()
     self.ui.menu:registerToMainMenu(self)
-    self.data_dir = os.getenv("STARDICT_DATA_DIR") or
+    self.data_dir = STARDICT_DATA_DIR or
+        os.getenv("STARDICT_DATA_DIR") or
         DataStorage:getDataDir() .. "/data/dict"
 
     -- Gather info about available dictionaries
@@ -307,7 +308,7 @@ If you'd like to change the order in which dictionaries are queried (and their r
                     local SpinWidget = require("ui/widget/spinwidget")
                     local font_size = G_reader_settings:readSetting("dict_font_size") or 20
                     local items_font = SpinWidget:new{
-                        width = Screen:getWidth() * 0.6,
+                        width = math.floor(Screen:getWidth() * 0.6),
                         value = font_size,
                         value_min = 8,
                         value_max = 32,
@@ -818,7 +819,7 @@ function ReaderDictionary:showDict(word, results, box, link)
             refresh_callback = function()
                 if self.view then
                     -- update info in footer (time, battery, etc)
-                    self.view.footer:updateFooter()
+                    self.view.footer:onUpdateFooter()
                 end
             end,
             html_dictionary_link_tapped_callback = function(dictionary, html_link)
@@ -835,11 +836,10 @@ function ReaderDictionary:showDownload(downloadable_dicts)
     for dummy, dict in ipairs(downloadable_dicts) do
         table.insert(kv_pairs, {dict.name, "",
             callback = function()
-                if not NetworkMgr:isOnline() then
-                    NetworkMgr:promptWifiOn()
-                    return
+                local connect_callback = function()
+                    self:downloadDictionaryPrep(dict)
                 end
-                self:downloadDictionaryPrep(dict)
+                NetworkMgr:runWhenOnline(connect_callback)
             end})
         local lang
         if dict.lang_in == dict.lang_out then
